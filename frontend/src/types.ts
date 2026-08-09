@@ -1,0 +1,62 @@
+export interface ColumnMetadata {
+  name: string;
+  type: string;
+  is_pk?: boolean;
+  is_pii?: boolean;
+  foreign_table?: string;
+  foreign_column?: string;
+}
+
+export interface TableMetadata {
+  table_name: string;
+  columns: ColumnMetadata[];
+  description: string;
+  foreign_keys?: {
+    column: string;
+    foreign_table: string;
+    foreign_column: string;
+  }[];
+}
+
+export interface ChartSpec {
+  type: 'line' | 'bar' | 'pie' | 'doughnut' | 'table';
+  data?: {
+    labels: string[];
+    datasets: {
+      label: string;
+      data: number[];
+      backgroundColor?: string | string[];
+      borderColor?: string | string[];
+      borderWidth?: number;
+      fill?: boolean;
+    }[];
+  };
+  options?: any;
+}
+
+export interface ChatMessage {
+  id: string;
+  timestamp: string;
+  sender: 'user' | 'agent';
+  prompt: string;
+  tenant_id: string;
+  phase?: 'planning' | 'executing' | 'reflecting' | 'summarizing' | 'complete' | 'error';
+  statusMessage?: string;
+  sqlQuery?: string;
+  strategy?: string;
+  explainCost?: number;
+  rawResults?: Record<string, any>[];
+  summary?: string;
+  chartSpec?: ChartSpec;
+  errorMessage?: string;
+  retryCount?: number;
+  isStreaming?: boolean;
+  cachedHit?: boolean;
+}
+
+export interface Tenant {
+  id: string;
+  name: string;
+  tier: string;
+  recordCount: number;
+}
