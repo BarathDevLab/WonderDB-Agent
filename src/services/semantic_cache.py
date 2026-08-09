@@ -3,6 +3,8 @@ import json
 import math
 import re
 from typing import Any
+import httpx
+from app.config import get_settings
 from db.redis import get_redis_client
 
 
@@ -31,13 +33,32 @@ def _pseudo_dense_embedding(text: str, dimensions: int = 1536) -> list[float]:
     return vec
 
 
-class SemanticCacheService:
-    """Vector-similarity and exact match semantic query caching service."""
+async def _get_neural_embedding(text: str) -> list[float]:
+    """Generate high-fidelity semantic embedding vector using Gemini or deterministic fallback."""
+    settings = get_settings()
+    if settings.gemini_api_key:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={settings.gemini_api_key}"
+            payload = {
+                "model": "models/gemini-embedding-001",
+                "content": {"parts": [{"text": text}]},
+            }
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.post(url, json=payload)
+                if res.status_code == 200:
+                    return res.json()["embedding"]["values"]
+        except Exception:
+            pass
 
-    def __init__(self, ttl_seconds: int = 3600, default_similarity_threshold: float = 0.85) -> None:
+    return _pseudo_dense_embedding(text, dimensions=1536)
+
+
+class SemanticCacheService:
+    """True Neural Vector-Similarity semantic query caching service."""
+
+    def __init__(self, ttl_seconds: int = 3600, default_similarity_threshold: float = 0.75) -> None:
         self._ttl = ttl_seconds
         self._similarity_threshold = default_similarity_threshold
-        # In-memory index of entries: key -> {prompt, embedding, payload, tenant_id}
         self._local_cache: dict[str, dict[str, Any]] = {}
 
     def _hash_key(self, prompt: str, tenant_id: str = "default") -> str:
@@ -49,10 +70,9 @@ class SemanticCacheService:
         self, prompt: str, tenant_id: str = "default", similarity_threshold: float | None = None
     ) -> dict[str, Any] | None:
         threshold = similarity_threshold or self._similarity_threshold
-        prompt_vec = _pseudo_dense_embedding(prompt)
         exact_key = self._hash_key(prompt, tenant_id)
 
-        # 1. Check exact key in Redis / local memory
+        # 1. Exact string match fast-path
         try:
             client = await get_redis_client()
             async with client:
@@ -64,22 +84,24 @@ class SemanticCacheService:
             if exact_key in self._local_cache:
                 return self._local_cache[exact_key].get("payload", self._local_cache[exact_key])
 
-        # 2. Semantic Vector Similarity Search against cached entries
+        # 2. Neural Vector Cosine Similarity Search
+        prompt_vec = await _get_neural_embedding(prompt)
         best_similarity = 0.0
         best_payload: dict[str, Any] | None = None
 
-        # Inspect local cache
         for entry in self._local_cache.values():
             if entry.get("tenant_id") == tenant_id and "embedding" in entry:
-                sim = _cosine_similarity(prompt_vec, entry["embedding"])
-                if sim > best_similarity:
-                    best_similarity = sim
-                    best_payload = entry.get("payload")
+                cached_vec = entry["embedding"]
+                if len(cached_vec) == len(prompt_vec):
+                    sim = _cosine_similarity(prompt_vec, cached_vec)
+                    if sim > best_similarity:
+                        best_similarity = sim
+                        best_payload = entry.get("payload")
 
         if best_similarity >= threshold and best_payload is not None:
             return best_payload
 
-        # Inspect Redis keys if available
+        # Check Redis if available
         try:
             client = await get_redis_client()
             async with client:
@@ -89,10 +111,12 @@ class SemanticCacheService:
                     if raw:
                         entry = json.loads(raw)
                         if entry.get("tenant_id") == tenant_id and "embedding" in entry:
-                            sim = _cosine_similarity(prompt_vec, entry["embedding"])
-                            if sim > best_similarity:
-                                best_similarity = sim
-                                best_payload = entry.get("payload")
+                            cached_vec = entry["embedding"]
+                            if len(cached_vec) == len(prompt_vec):
+                                sim = _cosine_similarity(prompt_vec, cached_vec)
+                                if sim > best_similarity:
+                                    best_similarity = sim
+                                    best_payload = entry.get("payload")
             if best_similarity >= threshold and best_payload is not None:
                 return best_payload
         except Exception:
@@ -104,7 +128,7 @@ class SemanticCacheService:
         self, prompt: str, payload: dict[str, Any], tenant_id: str = "default"
     ) -> None:
         key = self._hash_key(prompt, tenant_id)
-        embedding = _pseudo_dense_embedding(prompt)
+        embedding = await _get_neural_embedding(prompt)
         entry = {
             "prompt": prompt,
             "tenant_id": tenant_id,
@@ -146,7 +170,7 @@ semantic_cache_service = SemanticCacheService()
 
 
 async def get_semantic_cache(
-    prompt: str, tenant_id: str = "default", similarity_threshold: float = 0.85
+    prompt: str, tenant_id: str = "default", similarity_threshold: float = 0.75
 ) -> dict[str, Any] | None:
     return await semantic_cache_service.get(prompt, tenant_id, similarity_threshold)
 
