@@ -1,6 +1,9 @@
+import logging
 from typing import Any
 from agent.state import AgentState
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 from services.semantic_cache import set_semantic_cache
 from services.session_memory import append_session_event
 
@@ -28,7 +31,15 @@ def _build_chart_spec(raw_results: list[dict[str, Any]]) -> dict[str, Any]:
     labels = [str(r.get(label_key, f"Row {i}")) for i, r in enumerate(raw_results)]
     data_points = [float(r.get(value_key, 0)) for r in raw_results]
 
-    chart_type = "line" if "month" in label_key.lower() or "date" in label_key.lower() else "bar"
+    # Handle degenerate cases
+    if len(data_points) == 1:
+        chart_type = "bar"  # Single point always bar
+    elif all(v == 0 for v in data_points):
+        chart_type = "bar"  # All zeros — bar is clearest
+    elif "month" in label_key.lower() or "date" in label_key.lower():
+        chart_type = "line"
+    else:
+        chart_type = "bar"
 
     return {
         "type": chart_type,
@@ -54,59 +65,102 @@ def _build_chart_spec(raw_results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-async def _synthesize_with_llm(
+async def _synthesize_with_gemini(
     prompt: str,
     raw_results: list[dict[str, Any]],
     api_key: str | None = None,
+    model: str = "gemini-flash-latest",
 ) -> str | None:
-    """Use live LLM to formulate clear, natural language synthesis of data results."""
+    """Use Gemini API to formulate natural language summary of query results."""
     if not api_key or not raw_results:
         return None
 
     try:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=api_key)
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0.2,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a senior data analyst. Given a user question and query results dataset, provide a concise 2-sentence executive summary highlighting key findings.",
-                },
+        import httpx
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        system_instruction = (
+            "You are a senior data analyst. Given a user question and dataset, provide a concise 2-sentence executive summary highlighting key metrics."
+        )
+        user_content = f"Question: {prompt}\nDataset: {raw_results[:10]}"
+        payload = {
+            "contents": [
                 {
                     "role": "user",
-                    "content": f"Question: {prompt}\nDataset: {raw_results[:10]}",
-                },
+                    "parts": [{"text": f"{system_instruction}\n\n{user_content}"}]
+                }
             ],
-        )
-        content = response.choices[0].message.content
-        if content:
-            return content.strip()
-    except Exception:
+            "generationConfig": {
+                "temperature": 0.2,
+            }
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.post(url, json=payload)
+            if res.status_code == 200:
+                data = res.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if text:
+                    return text
+    except Exception as exc:
+        logger.warning("LLM synthesis failed: %s", exc)
         return None
+    return None
+
+
+async def _synthesize_with_llm(
+    prompt: str,
+    raw_results: list[dict[str, Any]],
+    api_key: str | None = None,
+    gemini_key: str | None = None,
+    gemini_model: str = "gemini-1.5-flash",
+) -> str | None:
+    """Use live LLM (Gemini or OpenAI) to formulate clear, natural language synthesis of data results."""
+    if not raw_results:
+        return None
+
+    # 1. Try Gemini
+    if gemini_key:
+        res = await _synthesize_with_gemini(prompt, raw_results, gemini_key, gemini_model)
+        if res:
+            return res
+
+    # 2. Try OpenAI
+    if api_key:
+        try:
+            from openai import AsyncOpenAI
+
+            client = AsyncOpenAI(api_key=api_key)
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                temperature=0.2,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a senior data analyst. Given a user question and query results dataset, provide a concise 2-sentence executive summary highlighting key findings.",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question: {prompt}\nDataset: {raw_results[:10]}",
+                    },
+                ],
+            )
+            content = response.choices[0].message.content
+            if content:
+                return content.strip()
+        except Exception as exc:
+            logger.warning("LLM synthesis failed: %s", exc)
+            return None
+
     return None
 
 
 def _synthesize_summary_fallback(
     prompt: str, raw_results: list[dict[str, Any]], error_message: str | None
 ) -> str:
-    if error_message and not raw_results:
-        return f"Unable to complete query due to: {error_message}"
-
-    if not raw_results:
-        return "Query executed successfully, returning 0 matching records."
-
-    row_count = len(raw_results)
-    if row_count == 1 and len(raw_results[0]) == 1:
-        k, v = next(iter(raw_results[0].items()))
-        return f"The total {k.replace('_', ' ')} is {v:,}." if isinstance(v, (int, float)) else f"The {k} is {v}."
-
-    return (
-        f"Retrieved {row_count} records matching your query '{prompt}'. "
-        f"Data has been structured and prepared for visualization below."
-    )
+    if error_message:
+        return f"Execution failed: {error_message}"
+    
+    return "LLM summary generation failed. Please check API keys and model availability."
 
 
 async def summarize_node(state: AgentState) -> AgentState:
@@ -117,18 +171,25 @@ async def summarize_node(state: AgentState) -> AgentState:
     raw_results = state.get("raw_results", [])
     sql_query = state.get("sql_query", "")
     error_message = state.get("error_message")
+    settings = get_settings()
 
     if state.get("cached_hit") and state.get("summary"):
         summary = state["summary"]
         chart_spec = state.get("chart_spec") or _build_chart_spec(raw_results)
     else:
-        settings = get_settings()
-        llm_summary = await _synthesize_with_llm(prompt, raw_results, settings.openai_api_key)
+        llm_summary = await _synthesize_with_llm(
+            prompt,
+            raw_results,
+            api_key=settings.openai_api_key,
+            gemini_key=settings.gemini_api_key,
+            gemini_model=settings.gemini_model,
+        )
         summary = llm_summary or _synthesize_summary_fallback(prompt, raw_results, error_message)
         chart_spec = _build_chart_spec(raw_results)
 
-    # 1. Update Semantic Cache for future instant lookups (if query executed successfully)
-    if not error_message and raw_results:
+    # 1. Update Semantic Cache for future instant lookups (if enabled & query succeeded)
+    cache_enabled = state.get("enable_cache", settings.enable_semantic_cache)
+    if cache_enabled and not error_message and raw_results:
         await set_semantic_cache(
             prompt,
             {

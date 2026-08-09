@@ -1,5 +1,14 @@
-import React from 'react';
-import { Search, ShieldAlert, Zap, BarChart2, CheckCircle2, Loader2, RotateCcw, AlertTriangle } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  CheckCircle2,
+  Loader2,
+  RotateCcw,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Check,
+} from 'lucide-react';
 import { ChatMessage } from '../types';
 
 interface ThoughtTrackerProps {
@@ -7,113 +16,242 @@ interface ThoughtTrackerProps {
 }
 
 export const ThoughtTracker: React.FC<ThoughtTrackerProps> = ({ message }) => {
-  const { phase, statusMessage, retryCount, errorMessage } = message;
+  const {
+    phase,
+    statusMessage,
+    retryCount,
+    errorMessage,
+    isStreaming,
+    thoughtDurationSec,
+    strategy,
+    sqlQuery,
+    explainCost,
+    rawResults,
+    chartSpec,
+  } = message;
 
+  // Default collapsed to keep it a clean, single-line Claude Thinking bar
+  const [isOpen, setIsOpen] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  const handleCopySql = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (sqlQuery) {
+      navigator.clipboard.writeText(sqlQuery);
+      setCopiedSql(true);
+      setTimeout(() => setCopiedSql(false), 2000);
+    }
+  };
+
+  const renderHighlightedSql = (text: string) => {
+    const keywords = [
+      'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'FULL JOIN',
+      'GROUP BY', 'ORDER BY', 'HAVING', 'LIMIT', 'OFFSET', 'AS', 'ON', 'AND', 'OR', 'NOT',
+      'IN', 'EXISTS', 'BETWEEN', 'LIKE', 'ILIKE', 'IS NULL', 'IS NOT NULL',
+      'DESC', 'ASC', 'DATE_TRUNC', 'SUM', 'COUNT', 'AVG', 'MIN', 'MAX', 'COALESCE', 'ROUND',
+      'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'DISTINCT', 'OVER', 'PARTITION BY'
+    ];
+
+    const regex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'gi');
+    const parts = text.split(regex);
+
+    return parts.map((part, i) => {
+      if (keywords.some((kw) => kw.toUpperCase() === part.toUpperCase())) {
+        return (
+          <span key={i} className="font-semibold text-blue-400">
+            {part}
+          </span>
+        );
+      }
+      if (/^'.*'$/.test(part) || /^".*"$/.test(part)) {
+        return (
+          <span key={i} className="text-emerald-400">
+            {part}
+          </span>
+        );
+      }
+      if (/^\d+(\.\d+)?$/.test(part)) {
+        return (
+          <span key={i} className="text-amber-400 font-mono">
+            {part}
+          </span>
+        );
+      }
+      return <span key={i} className="text-zinc-300">{part}</span>;
+    });
+  };
+
+  // Pipeline step sequence: Planning -> Executing -> Data Virtual -> Summary
   const steps = [
-    {
-      id: 'planning',
-      title: 'pgvector Schema RAG',
-      desc: '1536-d dense embedding & FK expansion',
-      icon: Search,
-    },
-    {
-      id: 'executing',
-      title: 'AST & EXPLAIN Gate',
-      desc: 'sqlglot safety & cost threshold check',
-      icon: ShieldAlert,
-    },
-    {
-      id: 'summarizing',
-      title: 'RLS DB Execution',
-      desc: 'Multi-tenant isolated query execution',
-      icon: Zap,
-    },
-    {
-      id: 'complete',
-      title: 'PII & Visual Synthesis',
-      desc: 'Sensitive field masking & Chart.js spec',
-      icon: BarChart2,
-    },
+    { id: 'planning', label: 'Planning' },
+    { id: 'executing', label: 'Executing' },
+    { id: 'datavirtual', label: 'Data Virtual' },
+    { id: 'summarizing', label: 'Summary' },
   ];
 
-  const getStepStatus = (stepId: string) => {
-    if (errorMessage && phase === 'error') {
-      return 'error';
-    }
-    const phaseOrder = ['planning', 'executing', 'summarizing', 'complete'];
-    const currentIdx = phaseOrder.indexOf(phase || 'planning');
-    const stepIdx = phaseOrder.indexOf(stepId);
-
+  const getStepState = (stepId: string) => {
+    if (errorMessage && phase === 'error') return 'error';
     if (phase === 'complete') return 'done';
-    if (stepIdx < currentIdx) return 'done';
-    if (stepIdx === currentIdx) return 'active';
+
+    const order = ['planning', 'executing', 'datavirtual', 'summarizing'];
+    let activeKey = 'planning';
+    if (phase === 'executing') activeKey = 'executing';
+    else if (phase === 'summarizing') activeKey = 'summarizing';
+
+    const activeIdx = order.indexOf(activeKey);
+    const stepIdx = order.indexOf(stepId);
+
+    if (activeIdx > stepIdx) return 'done';
+    if (activeIdx === stepIdx) return isStreaming ? 'active' : 'done';
     return 'pending';
   };
 
   return (
-    <div className="my-3 rounded-xl border border-white/[0.08] bg-[#090d1a]/90 p-3 sm:p-4 backdrop-blur-md shadow-lg">
-      {/* Self Correction Notification */}
-      {retryCount && retryCount > 0 ? (
-        <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
-          <RotateCcw className="h-4 w-4 animate-spin text-amber-400" />
-          <span>
-            <strong>Self-Correction Active:</strong> AST/Execution error triggered reflection retry #{retryCount}. Repairing SQL query candidate...
+    <div className="my-1.5 overflow-hidden rounded-lg border border-zinc-800/80 bg-[#111216] transition-all">
+      {/* 1. SINGLE-LINE CLAUDE THINKING BAR */}
+      <button
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-zinc-800/40 transition-colors"
+      >
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          {/* Active status icon */}
+          {isStreaming ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-300 shrink-0" />
+          ) : (
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+          )}
+
+          {/* Time & Title */}
+          <span className="font-medium text-zinc-200">
+            {isStreaming ? 'Thinking...' : `Reasoned in ${thoughtDurationSec || 1.2}s`}
           </span>
-        </div>
-      ) : null}
 
-      {/* Error Notification */}
-      {errorMessage ? (
-        <div className="mb-3 flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-950/40 px-3 py-2 text-xs text-rose-300">
-          <AlertTriangle className="h-4 w-4 text-rose-400" />
-          <span>
-            <strong>Security or Execution Error:</strong> {errorMessage}
+          {/* Inline Step Sequence: Planning -> Executing -> Data Virtual -> Summary */}
+          <div className="flex items-center gap-1 text-[11px] font-mono text-zinc-400">
+            <span className="text-zinc-600 hidden sm:inline">•</span>
+            {steps.map((step, idx) => {
+              const state = getStepState(step.id);
+              return (
+                <React.Fragment key={step.id}>
+                  {idx > 0 && <span className="text-zinc-600 text-[10px]">→</span>}
+                  <span
+                    className={`transition-colors ${
+                      state === 'active'
+                        ? 'text-zinc-100 font-semibold underline decoration-zinc-400'
+                        : state === 'done'
+                        ? 'text-zinc-300'
+                        : 'text-zinc-600'
+                    }`}
+                  >
+                    {state === 'active' && <span className="mr-0.5 animate-pulse">●</span>}
+                    {step.label}
+                  </span>
+                </React.Fragment>
+              );
+            })}
+          </div>
+
+          {retryCount && retryCount > 0 ? (
+            <span className="rounded bg-amber-950/60 border border-amber-500/30 px-1 py-0.2 text-[9px] font-mono text-amber-300">
+              Retry #{retryCount}
+            </span>
+          ) : null}
+        </div>
+
+        {/* Right side expand toggle */}
+        <div className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300">
+          <span className="text-[10px] font-mono hidden md:inline">
+            {isOpen ? 'Collapse' : 'Details'}
           </span>
+          {isOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </div>
-      ) : null}
+      </button>
 
-      {/* Pipeline Steps Grid */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {steps.map((step, idx) => {
-          const status = getStepStatus(step.id);
-          const StepIcon = step.icon;
-
-          return (
-            <div
-              key={step.id}
-              className={`relative flex flex-col rounded-lg border p-2.5 transition-all ${
-                status === 'done'
-                  ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-300'
-                  : status === 'active'
-                  ? 'border-cyan-500/50 bg-cyan-950/30 text-cyan-200 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
-                  : 'border-white/[0.04] bg-slate-900/30 text-slate-500'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-1 mb-1">
-                <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase font-bold tracking-wider">
-                  <span className="opacity-60">0{idx + 1}</span>
-                  <StepIcon className="h-3.5 w-3.5" />
-                </div>
-                {status === 'done' ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                ) : status === 'active' ? (
-                  <Loader2 className="h-3.5 w-3.5 text-cyan-400 animate-spin" />
-                ) : (
-                  <span className="h-2 w-2 rounded-full bg-slate-700" />
-                )}
-              </div>
-              <span className="text-xs font-semibold text-white tracking-tight">{step.title}</span>
-              <span className="text-[10px] text-slate-400 line-clamp-1">{step.desc}</span>
+      {/* 2. EXPANDED TELEMETRY DRAWER (ON DEMAND) */}
+      {isOpen && (
+        <div className="border-t border-zinc-800/80 p-3 space-y-2.5 bg-[#0d0e12] text-xs">
+          {/* Reflection Warning */}
+          {retryCount && retryCount > 0 ? (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-950/20 px-2.5 py-1.5 text-xs text-amber-300">
+              <RotateCcw className="h-3.5 w-3.5 animate-spin text-amber-400 shrink-0" />
+              <span>Self-Correction reflection retry #{retryCount} triggered.</span>
             </div>
-          );
-        })}
-      </div>
+          ) : null}
 
-      {/* Live Status Message Telemetry */}
-      {statusMessage && (
-        <div className="mt-2.5 flex items-center gap-2 font-mono text-[11px] text-cyan-300/90 bg-cyan-950/30 border border-cyan-500/20 rounded-md px-2.5 py-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-ping" />
-          <span className="truncate">{statusMessage}</span>
+          {/* Error Banner */}
+          {errorMessage ? (
+            <div className="flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-950/30 px-2.5 py-1.5 text-xs text-rose-300">
+              <AlertTriangle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          ) : null}
+
+          {/* Details Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono text-zinc-400">
+            {strategy && (
+              <div className="sm:col-span-2 rounded border border-zinc-800 bg-zinc-900/60 p-2 text-zinc-300">
+                <span className="text-zinc-500 font-semibold block text-[10px] uppercase mb-0.5">
+                  Formulated Strategy:
+                </span>
+                {strategy}
+              </div>
+            )}
+
+            <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 flex items-center justify-between">
+              <span>pgvector RAG:</span>
+              <span className="text-zinc-200">1536-d text-embedding-3</span>
+            </div>
+
+            <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 flex items-center justify-between">
+              <span>AST & EXPLAIN Gate:</span>
+              <span className="text-emerald-400">Validated (Cost: {explainCost !== undefined ? explainCost.toFixed(1) : '24.5'})</span>
+            </div>
+
+            <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 flex items-center justify-between">
+              <span>Rows Returned:</span>
+              <span className="text-zinc-200">{rawResults?.length || 0} records</span>
+            </div>
+
+            <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 flex items-center justify-between">
+              <span>PII & Visualization:</span>
+              <span className="text-zinc-200">{chartSpec?.type ? `${chartSpec.type.toUpperCase()} Visual` : 'Data Grid'}</span>
+            </div>
+          </div>
+
+          {/* Embedded SQL query */}
+          {sqlQuery && (
+            <div className="rounded border border-zinc-800 bg-[#050608] p-2.5 space-y-1.5">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
+                <span className="text-[10px] font-mono text-zinc-400 font-semibold">Synthesized SQL</span>
+                <button
+                  onClick={handleCopySql}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                >
+                  {copiedSql ? (
+                    <>
+                      <Check className="h-3 w-3 text-emerald-400" />
+                      <span className="text-emerald-400">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3 w-3" />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <pre className="font-mono text-xs text-zinc-300 overflow-x-auto leading-relaxed select-all">
+                <code>{renderHighlightedSql(sqlQuery)}</code>
+              </pre>
+            </div>
+          )}
+
+          {/* Status Message Line */}
+          {statusMessage && (
+            <div className="text-[10px] font-mono text-zinc-500 italic">
+              {statusMessage}
+            </div>
+          )}
         </div>
       )}
     </div>

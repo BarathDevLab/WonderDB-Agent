@@ -9,8 +9,8 @@ from agent.state import AgentState
 
 
 def should_plan_route(state: AgentState) -> str:
-    """Conditional routing edge for fast-return semantic cache hits."""
-    if state.get("cached_hit"):
+    """Conditional routing edge for fast-return semantic cache hits or planning failure."""
+    if state.get("cached_hit") or state.get("current_phase") == "planning_failed":
         return "summarize"
     return "execute"
 

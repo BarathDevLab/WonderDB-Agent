@@ -1,6 +1,12 @@
 import asyncio
 from pathlib import Path
+import sys
 from typing import Any
+
+_src_root = str(Path(__file__).resolve().parent.parent)
+if _src_root not in sys.path:
+    sys.path.insert(0, _src_root)
+
 import asyncpg
 
 from app.config import get_settings

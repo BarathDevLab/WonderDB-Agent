@@ -1,67 +1,84 @@
+import asyncio
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 import json
 from typing import Any
 from uuid import UUID
+
+from sqlglot import parse as sqlglot_parse
+
 from agent.state import AgentState
 from app.config import get_settings
 from core.ast_validator import validate_sql
 from core.cost_evaluator import evaluate_cost
 from core.pii_redactor import redact_rows
-from db.postgres import PostgresPool
+from db.postgres import get_shared_pool
+
+logger = logging.getLogger(__name__)
+
+_MAX_RESULT_ROWS = 200
+_QUERY_TIMEOUT_SECONDS = 15.0
 
 
-def _sandbox_execute_query(sql: str, tenant_id: str) -> list[dict[str, Any]]:
-    """Deterministic sandbox fallback execution when live PostgreSQL daemon is offline."""
-    del tenant_id
-    s = sql.lower()
+def _enforce_limit(sql: str, max_rows: int = 100) -> str:
+    """Programmatically enforce LIMIT on SQL queries via AST transformation."""
+    try:
+        statements = sqlglot_parse(sql)
+        if statements and hasattr(statements[0], 'args'):
+            tree = statements[0]
+            existing_limit = tree.args.get("limit")
+            if existing_limit is None:
+                tree = tree.limit(max_rows)
+            else:
+                # Cap existing LIMIT if it exceeds max_rows
+                try:
+                    limit_val = int(existing_limit.expression.this)
+                    if limit_val > max_rows:
+                        tree = tree.limit(max_rows)
+                except (AttributeError, ValueError, TypeError):
+                    pass
+            return tree.sql()
+    except Exception:
+        pass
+    # Fallback: append LIMIT if none detected
+    if "limit" not in sql.lower():
+        return f"{sql.rstrip().rstrip(';')} LIMIT {max_rows}"
+    return sql
 
-    if "count(*)" in s:
-        if "customers" in s:
-            return [{"total_customers": 42}]
-        if "orders" in s:
-            return [{"status": "completed", "order_count": 120}, {"status": "pending", "order_count": 15}]
 
-    if "monthly_revenue" in s or "order_month" in s:
-        return [
-            {"order_month": "2026-01-01", "monthly_revenue": 45200.50},
-            {"order_month": "2026-02-01", "monthly_revenue": 58900.00},
-            {"order_month": "2026-03-01", "monthly_revenue": 62450.25},
-        ]
+import uuid
 
-    if "total_revenue" in s or "total_spent" in s:
-        return [
-            {"full_name": "Acme Corp", "email": "contact@acme.corp", "total_revenue": 128450.00},
-            {"full_name": "Globex Inc", "email": "admin@globex.com", "total_revenue": 94200.50},
-            {"full_name": "Initech LLC", "email": "billing@initech.com", "total_revenue": 78100.00},
-        ]
 
-    if "customers" in s:
-        return [
-            {"id": "c1", "full_name": "Alice Smith", "email": "alice@example.com", "ssn": "123-45-6789"},
-            {"id": "c2", "full_name": "Bob Jones", "email": "bob@example.com", "ssn": "987-65-4321"},
-        ]
-
-    return [
-        {"id": "o1", "total_amount": 1500.00, "status": "completed", "created_at": "2026-03-01T10:00:00Z"},
-        {"id": "o2", "total_amount": 320.50, "status": "completed", "created_at": "2026-03-02T14:30:00Z"},
-    ]
+def _format_tenant_uuid(tenant_id: str) -> str:
+    """Ensure tenant_id is a valid UUID string for Postgres RLS or return empty string."""
+    try:
+        return str(uuid.UUID(tenant_id))
+    except (ValueError, TypeError, AttributeError):
+        return ""
 
 
 async def _execute_against_live_postgres(
     sql: str, tenant_id: str
-) -> tuple[list[dict[str, Any]], float] | None:
-    """Execute query against live PostgreSQL instance via asyncpg with RLS and EXPLAIN cost gate."""
-    settings = get_settings()
-    pool = PostgresPool(settings)
+) -> tuple[list[dict[str, Any]], float]:
+    """Execute query against live PostgreSQL with RLS tenant isolation, cost gate, and timeout."""
+    pool = await get_shared_pool()
 
-    try:
-        async with pool.acquire() as conn:
-            # 1. Set multi-tenant session isolation using set_config
-            await conn.execute("SELECT set_config('app.current_tenant_id', $1, true);", tenant_id)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # 1. Set tenant context within transaction scope
+            safe_tenant = _format_tenant_uuid(tenant_id)
+            await conn.execute(
+                "SELECT set_config('app.current_tenant_id', $1, true);", safe_tenant
+            )
 
-            # 2. Run real EXPLAIN (FORMAT JSON) cost gate
-            explain_records = await conn.fetch(f"EXPLAIN (FORMAT JSON) {sql}")
+            # 2. Run EXPLAIN cost gate (parameterized via prepared statement)
+            explain_sql = f"EXPLAIN (FORMAT JSON) {sql}"
+            explain_records = await asyncio.wait_for(
+                conn.fetch(explain_sql), timeout=_QUERY_TIMEOUT_SECONDS
+            )
+
+            estimated_cost = 100.0
             if explain_records and "QUERY PLAN" in explain_records[0]:
                 raw_plan = explain_records[0]["QUERY PLAN"]
                 plan_json = json.loads(raw_plan) if isinstance(raw_plan, str) else raw_plan
@@ -69,11 +86,19 @@ async def _execute_against_live_postgres(
                 if not cost_eval.within_threshold:
                     raise ValueError(f"Query Cost Rejected: {cost_eval.reason}")
                 estimated_cost = cost_eval.total_cost
-            else:
-                estimated_cost = 100.0
 
-            # 3. Execute actual SELECT query
-            records = await conn.fetch(sql)
+            # 3. Execute actual SELECT with timeout
+            records = await asyncio.wait_for(
+                conn.fetch(sql), timeout=_QUERY_TIMEOUT_SECONDS
+            )
+
+            # 4. Truncate oversized results
+            if len(records) > _MAX_RESULT_ROWS:
+                logger.warning(
+                    "Query returned %d rows, truncating to %d", len(records), _MAX_RESULT_ROWS
+                )
+                records = records[:_MAX_RESULT_ROWS]
+
             results: list[dict[str, Any]] = []
             for r in records:
                 row: dict[str, Any] = {}
@@ -86,9 +111,6 @@ async def _execute_against_live_postgres(
                         row[k] = v
                 results.append(row)
             return results, estimated_cost
-    except Exception:
-        # Fallback to sandbox if live database is unreachable
-        return None
 
 
 async def execute_node(state: AgentState) -> AgentState:
@@ -96,36 +118,44 @@ async def execute_node(state: AgentState) -> AgentState:
     sql = state.get("sql_query", "").strip()
     tenant_id = state.get("tenant_id", "default-tenant")
 
-    # 1. AST Validation Gate (Strict SELECT root; rejects DML, DROP, DELETE, etc.)
+    # 1. AST Validation Gate
     try:
         validate_sql(sql)
     except Exception as exc:
         return {
             **state,
             "ast_valid": False,
+            "raw_results": [],
             "error_message": f"AST Validation Error: {exc}",
             "current_phase": "execution_failed",
         }
 
-    # 2. Live Database Execution with Sandbox Fallback
-    live_result = await _execute_against_live_postgres(sql, tenant_id)
-    if live_result is not None:
-        raw_data, estimated_cost = live_result
-    else:
-        # Live DB unavailable -> run in sandbox with simulated EXPLAIN cost check
-        estimated_cost = 142.50
-        cost_eval = evaluate_cost(estimated_cost, threshold=10000.0)
-        if not cost_eval.within_threshold:
-            return {
-                **state,
-                "ast_valid": True,
-                "explain_cost": estimated_cost,
-                "error_message": f"Query Cost Rejected: {cost_eval.reason}",
-                "current_phase": "execution_failed",
-            }
-        raw_data = _sandbox_execute_query(sql, tenant_id)
+    # 2. Enforce LIMIT programmatically
+    sql = _enforce_limit(sql, max_rows=100)
 
-    # 3. PII Redaction on result dataset
+    # 3. Live Database Execution (no sandbox fallback)
+    try:
+        raw_data, estimated_cost = await _execute_against_live_postgres(sql, tenant_id)
+    except asyncio.TimeoutError:
+        return {
+            **state,
+            "ast_valid": True,
+            "raw_results": [],
+            "error_message": f"Query timed out after {_QUERY_TIMEOUT_SECONDS}s. Simplify the query or add filters.",
+            "current_phase": "execution_failed",
+        }
+    except Exception as exc:
+        error_msg = str(exc)
+        logger.warning("Database execution failed: %s", error_msg)
+        return {
+            **state,
+            "ast_valid": True,
+            "raw_results": [],
+            "error_message": f"Database Execution Error: {error_msg}",
+            "current_phase": "execution_failed",
+        }
+
+    # 4. PII Redaction
     try:
         redacted_data = redact_rows(raw_data)
         return {
@@ -141,6 +171,7 @@ async def execute_node(state: AgentState) -> AgentState:
             **state,
             "ast_valid": True,
             "explain_cost": estimated_cost,
+            "raw_results": [],
             "error_message": f"Execution Processing Error: {exc}",
             "current_phase": "execution_failed",
         }

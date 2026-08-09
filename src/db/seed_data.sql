@@ -39,3 +39,34 @@ VALUES
     ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'orders', 'total_amount', 'NUMERIC(12,2)', false, false, false, 'Total monetary amount for order'),
     ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'orders', 'status', 'VARCHAR(50)', false, false, false, 'Order state: completed, pending, cancelled')
 ON CONFLICT DO NOTHING;
+
+-- 5. Insert Sample Products for Acme Corp
+INSERT INTO products (id, tenant_id, sku, name, category, price)
+VALUES
+    ('d0010000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'WDG-001', 'Enterprise Widget', 'Widgets', 49.99),
+    ('d0020000-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'GAD-002', 'Pro Gadget', 'Gadgets', 129.99),
+    ('d0030000-0000-0000-0000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'SVC-003', 'Premium Service Pack', 'Services', 299.99)
+ON CONFLICT DO NOTHING;
+
+-- 6. Insert Sample Order Items for Acme Corp
+INSERT INTO order_items (id, tenant_id, order_id, product_id, quantity, unit_price)
+VALUES
+    ('e0010000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'f0010000-0000-0000-0000-000000000001', 'd0010000-0000-0000-0000-000000000001', 10, 49.99),
+    ('e0020000-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'f0010000-0000-0000-0000-000000000001', 'd0020000-0000-0000-0000-000000000002', 5, 129.99),
+    ('e0030000-0000-0000-0000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'f0030000-0000-0000-0000-000000000003', 'd0030000-0000-0000-0000-000000000003', 8, 299.99)
+ON CONFLICT DO NOTHING;
+
+-- 7. Additional Schema Catalog entries for new tables
+INSERT INTO schema_catalog (tenant_id, table_name, column_name, data_type, is_primary_key, is_foreign_key, is_pii, description)
+VALUES
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'products', 'id', 'UUID', true, false, false, 'Product primary key identifier'),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'products', 'sku', 'VARCHAR(64)', false, false, false, 'Product stock keeping unit code'),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'products', 'name', 'VARCHAR(255)', false, false, false, 'Product display name'),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'products', 'category', 'VARCHAR(128)', false, false, false, 'Product category classification'),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'products', 'price', 'NUMERIC(10,2)', false, false, false, 'Product retail price'),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'order_items', 'id', 'UUID', true, false, false, 'Order item primary key'),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'order_items', 'order_id', 'UUID', false, true, false, 'FK to orders table'),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'order_items', 'product_id', 'UUID', false, true, false, 'FK to products table'),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'order_items', 'quantity', 'INTEGER', false, false, false, 'Quantity of product in order'),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'order_items', 'unit_price', 'NUMERIC(10,2)', false, false, false, 'Price per unit at time of order')
+ON CONFLICT DO NOTHING;

@@ -15,10 +15,10 @@ router = APIRouter(tags=["agent"])
 
 
 class ChatStreamRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, description="Natural language query")
-    tenant_id: str = Field(default="default-tenant", description="Active tenant UUID")
-    user_id: str = Field(default="anonymous", description="Authenticated user ID")
-    session_id: str | None = Field(default=None, description="Optional session conversation ID")
+    prompt: str = Field(..., min_length=1, max_length=2000, description="Natural language query")
+    tenant_id: str = Field(default="default-tenant", max_length=64, description="Active tenant UUID")
+    user_id: str = Field(default="anonymous", max_length=128, description="Authenticated user ID")
+    session_id: str | None = Field(default=None, max_length=128, description="Optional session conversation ID")
 
 
 async def _generate_sse_stream(initial_state: AgentState) -> AsyncIterator[str]:
@@ -33,8 +33,8 @@ async def _generate_sse_stream(initial_state: AgentState) -> AsyncIterator[str]:
 
 @router.get("/agent/stream")
 async def stream_agent_get(
-    prompt: str = Query(..., min_length=1),
-    tenant_id: str = Query(default="default-tenant"),
+    prompt: str = Query(..., min_length=1, max_length=2000),
+    tenant_id: str = Query(default="default-tenant", max_length=64),
     user_id: str = Query(default="anonymous"),
     session_id: str | None = Query(default=None),
 ) -> StreamingResponse:

@@ -4,6 +4,7 @@ from agent.graph import get_graph
 from agent.state import AgentState
 from services.semantic_cache import (
     delete_semantic_cache,
+    flush_semantic_cache,
     get_semantic_cache,
     set_semantic_cache,
 )
@@ -15,7 +16,7 @@ async def test_semantic_cache_lifecycle() -> None:
     prompt = "What is the average order value?"
     tenant_id = "tenant-cache-test"
 
-    await delete_semantic_cache(prompt, tenant_id)
+    await flush_semantic_cache()
     cached_before = await get_semantic_cache(prompt, tenant_id)
     assert cached_before is None
 
@@ -37,6 +38,7 @@ async def test_semantic_cache_lifecycle() -> None:
 @pytest.mark.asyncio
 async def test_session_memory_appends_and_retrieves() -> None:
     session_id = "session-test-uuid-1"
+    await session_memory_service.clear_session(session_id)
     event_1 = {"phase": "plan", "prompt": "Show sales"}
     event_2 = {"phase": "summary", "summary": "Sales are $10,000"}
 
@@ -69,6 +71,7 @@ async def test_graph_fast_returns_on_semantic_cache_hit() -> None:
         "tenant_id": tenant_id,
         "session_id": "sess-fast-1",
         "retry_count": 0,
+        "enable_cache": True,
     }
 
     final_state = await graph.ainvoke(initial_state)

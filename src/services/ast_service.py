@@ -48,4 +48,9 @@ class ASTService:
             if root.find(node_type) is not None:
                 raise ValueError(f"Disallowed SQL operation detected: {node_type.__name__}.")
 
+        # Additional safety checks for PostgreSQL-specific constructs
+        sql_upper = sql.upper()
+        if any(keyword in sql_upper for keyword in ('INTO ', 'GRANT ', 'REVOKE ', 'SET ROLE', 'VACUUM', 'COPY ')):
+            raise ValueError("Disallowed SQL construct detected.")
+
         return ASTValidationResult(sql=sql, is_valid=True)

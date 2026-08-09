@@ -1,10 +1,12 @@
+import logging
 import math
 import re
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 
 def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-    """Calculate cosine similarity between two dense embedding vectors."""
     if not vec_a or not vec_b or len(vec_a) != len(vec_b):
         return 0.0
     dot = sum(a * b for a, b in zip(vec_a, vec_b))
@@ -15,117 +17,123 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _pseudo_dense_embedding(text: str, dimensions: int = 1536) -> list[float]:
-    """Deterministic, lightweight 1536-dim dense vector embedding for semantic matching and pgvector compatibility."""
-    tokens = re.findall(r"\w+", text.lower())
-    vec = [0.0] * dimensions
-    for i, token in enumerate(tokens):
-        token_hash = hash(token)
-        idx = abs(token_hash) % dimensions
-        weight = 1.0 / (1.0 + math.log(1 + i))
-        vec[idx] += weight
-    norm = math.sqrt(sum(v * v for v in vec))
-    if norm > 0:
-        vec = [v / norm for v in vec]
-    return vec
+
 
 
 async def generate_embedding(text: str, api_key: str | None = None) -> list[float]:
-    """Generate dense 1536-dim vector embedding using OpenAI or local deterministic fallback."""
-    if api_key:
-        try:
-            from openai import AsyncOpenAI
-            client = AsyncOpenAI(api_key=api_key)
-            resp = await client.embeddings.create(
-                model="text-embedding-3-small",
-                input=text,
-            )
-            return resp.data[0].embedding
-        except Exception:
-            pass
-    return _pseudo_dense_embedding(text, dimensions=1536)
+    if not api_key:
+        raise ValueError("API key is required to generate embeddings in production.")
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key)
+        resp = await client.embeddings.create(
+            model="text-embedding-3-small",
+            input=text,
+        )
+        return resp.data[0].embedding
+    except Exception as exc:
+        logger.error(f"Failed to generate embedding: {exc}")
+        raise ValueError(f"Failed to generate embedding: {exc}")
+
+
+
+
+_PII_COLUMN_NAMES = {"email", "ssn", "social_security", "password", "phone", "credit_card", "tax_id", "salary"}
 
 
 class SchemaRAGService:
-    """Production Schema RAG service supporting PostgreSQL pgvector, full-text search, and FK graph traversal."""
+    """Dynamic Schema RAG service with live information_schema discovery and FK graph traversal."""
 
     def __init__(self) -> None:
-        self._seed_catalog: list[dict[str, Any]] = [
-            {
-                "table_name": "customers",
-                "columns": [
-                    {"name": "id", "type": "UUID", "is_pk": True, "is_pii": False},
-                    {"name": "tenant_id", "type": "UUID", "is_pk": False, "is_pii": False},
-                    {"name": "full_name", "type": "VARCHAR(255)", "is_pk": False, "is_pii": False},
-                    {"name": "email", "type": "VARCHAR(255)", "is_pk": False, "is_pii": True},
-                    {"name": "ssn", "type": "VARCHAR(32)", "is_pk": False, "is_pii": True},
-                    {"name": "created_at", "type": "TIMESTAMPTZ", "is_pk": False, "is_pii": False},
-                ],
-                "foreign_keys": [],
-                "description": "Customer demographics, accounts, identity, contact information and profile records",
-                "embedding": _pseudo_dense_embedding(
-                    "customers user account identity full name email ssn profile demographics"
-                ),
-            },
-            {
-                "table_name": "orders",
-                "columns": [
-                    {"name": "id", "type": "UUID", "is_pk": True, "is_pii": False},
-                    {"name": "tenant_id", "type": "UUID", "is_pk": False, "is_pii": False},
-                    {"name": "customer_id", "type": "UUID", "is_pk": False, "is_pii": False},
-                    {"name": "total_amount", "type": "NUMERIC(12,2)", "is_pk": False, "is_pii": False},
-                    {"name": "status", "type": "VARCHAR(50)", "is_pk": False, "is_pii": False},
-                    {"name": "created_at", "type": "TIMESTAMPTZ", "is_pk": False, "is_pii": False},
-                ],
-                "foreign_keys": [
-                    {"column": "customer_id", "foreign_table": "customers", "foreign_column": "id"}
-                ],
-                "description": "Customer orders, billing sales transactions, order revenue, monthly sales status, and purchase amounts",
-                "embedding": _pseudo_dense_embedding(
-                    "orders sales revenue purchases monthly billing total amount transactions"
-                ),
-            },
-            {
-                "table_name": "order_items",
-                "columns": [
-                    {"name": "id", "type": "UUID", "is_pk": True, "is_pii": False},
-                    {"name": "tenant_id", "type": "UUID", "is_pk": False, "is_pii": False},
-                    {"name": "order_id", "type": "UUID", "is_pk": False, "is_pii": False},
-                    {"name": "product_id", "type": "UUID", "is_pk": False, "is_pii": False},
-                    {"name": "quantity", "type": "INTEGER", "is_pk": False, "is_pii": False},
-                    {"name": "unit_price", "type": "NUMERIC(10,2)", "is_pk": False, "is_pii": False},
-                ],
-                "foreign_keys": [
-                    {"column": "order_id", "foreign_table": "orders", "foreign_column": "id"},
-                    {"column": "product_id", "foreign_table": "products", "foreign_column": "id"},
-                ],
-                "description": "Line items breakdown per order with individual SKU quantities and unit pricing",
-                "embedding": _pseudo_dense_embedding(
-                    "order items line item quantity unit price skus breakdown"
-                ),
-            },
-            {
-                "table_name": "products",
-                "columns": [
-                    {"name": "id", "type": "UUID", "is_pk": True, "is_pii": False},
-                    {"name": "tenant_id", "type": "UUID", "is_pk": False, "is_pii": False},
-                    {"name": "sku", "type": "VARCHAR(64)", "is_pk": False, "is_pii": False},
-                    {"name": "name", "type": "VARCHAR(255)", "is_pk": False, "is_pii": False},
-                    {"name": "category", "type": "VARCHAR(128)", "is_pk": False, "is_pii": False},
-                    {"name": "price", "type": "NUMERIC(10,2)", "is_pk": False, "is_pii": False},
-                ],
-                "foreign_keys": [],
-                "description": "Product catalog inventory, SKUs, category classifications, and retail prices",
-                "embedding": _pseudo_dense_embedding(
-                    "products inventory skus items categories retail price catalog"
-                ),
-            },
-        ]
+        self._live_catalog: list[dict[str, Any]] | None = None
+        self._catalog_embeddings: dict[str, list[float]] = {}
+
+    async def _discover_schema_from_db(self, pool: Any, tenant_id: str) -> list[dict[str, Any]]:
+        """Dynamically discover table schemas from PostgreSQL information_schema."""
+        try:
+            async with pool.acquire() as conn:
+                # Get all user tables (exclude system tables)
+                columns = await conn.fetch("""
+                    SELECT c.table_name, c.column_name, c.data_type, c.is_nullable,
+                           CASE WHEN tc.constraint_type = 'PRIMARY KEY' THEN true ELSE false END AS is_pk
+                    FROM information_schema.columns c
+                    LEFT JOIN information_schema.key_column_usage kcu
+                        ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+                        AND c.table_schema = kcu.table_schema
+                    LEFT JOIN information_schema.table_constraints tc
+                        ON kcu.constraint_name = tc.constraint_name
+                        AND tc.constraint_type = 'PRIMARY KEY'
+                        AND tc.table_schema = kcu.table_schema
+                    WHERE c.table_schema = 'public'
+                      AND c.table_name NOT IN ('schema_catalog', 'tenants')
+                    ORDER BY c.table_name, c.ordinal_position;
+                """)
+
+                # Get foreign key relationships
+                fk_rows = await conn.fetch("""
+                    SELECT
+                        tc.table_name,
+                        kcu.column_name,
+                        ccu.table_name AS foreign_table,
+                        ccu.column_name AS foreign_column
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                        ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+                    JOIN information_schema.constraint_column_usage ccu
+                        ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+                    WHERE tc.constraint_type = 'FOREIGN KEY'
+                      AND tc.table_schema = 'public';
+                """)
+
+                # Build FK lookup
+                fk_map: dict[str, list[dict[str, str]]] = {}
+                for fk in fk_rows:
+                    t = fk["table_name"]
+                    if t not in fk_map:
+                        fk_map[t] = []
+                    fk_map[t].append({
+                        "column": fk["column_name"],
+                        "foreign_table": fk["foreign_table"],
+                        "foreign_column": fk["foreign_column"],
+                    })
+
+                # Group into table schemas
+                tables: dict[str, dict[str, Any]] = {}
+                for row in columns:
+                    t_name = row["table_name"]
+                    if t_name not in tables:
+                        tables[t_name] = {
+                            "table_name": t_name,
+                            "columns": [],
+                            "foreign_keys": fk_map.get(t_name, []),
+                            "description": f"Table {t_name} in the enterprise database",
+                        }
+                    col_name = row["column_name"]
+                    tables[t_name]["columns"].append({
+                        "name": col_name,
+                        "type": row["data_type"].upper(),
+                        "is_pk": bool(row["is_pk"]),
+                        "is_pii": col_name.lower() in _PII_COLUMN_NAMES,
+                    })
+
+                catalog = list(tables.values())
+                if catalog:
+                    self._live_catalog = catalog
+                    logger.info("Discovered %d tables from information_schema", len(catalog))
+                return catalog
+        except Exception as exc:
+            logger.warning("Failed to discover schema from DB: %s", exc)
+            return []
+
+    def _get_catalog(self) -> list[dict[str, Any]]:
+        """Return live catalog if available, otherwise return empty list."""
+        if self._live_catalog:
+            return self._live_catalog
+        return []
 
     async def _query_live_pgvector(
         self, prompt_embedding: list[float], tenant_id: str, pool: Any
     ) -> list[dict[str, Any]]:
-        """Query live pgvector schema_catalog table in PostgreSQL."""
         try:
             async with pool.acquire() as conn:
                 query = """
@@ -137,9 +145,9 @@ class SchemaRAGService:
                     LIMIT 15;
                 """
                 records = await conn.fetch(query, str(prompt_embedding), tenant_id)
-                # Group columns into table schemas
+                catalog = self._get_catalog()
+                table_lookup = {t["table_name"]: t for t in catalog}
                 tables: dict[str, dict[str, Any]] = {}
-                table_lookup = {t["table_name"]: t for t in self._seed_catalog}
                 for r in records:
                     t_name = r["table_name"]
                     if t_name not in tables:
@@ -164,24 +172,20 @@ class SchemaRAGService:
     def _traverse_foreign_key_graph(
         self, initial_tables: list[dict[str, Any]], catalog: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """Multi-hop graph traversal attaching connected lookup tables via FK edges (both directions)."""
         table_lookup = {t["table_name"]: t for t in catalog}
         selected = {t["table_name"] for t in initial_tables}
         result = list(initial_tables)
 
-        # Multi-hop traversal (depth = 2)
         for _ in range(2):
             for table in list(result):
                 t_name = table["table_name"]
                 seed_fks = table_lookup.get(t_name, {}).get("foreign_keys", [])
-                # 1. Outgoing FKs (e.g. order_items -> orders -> customers)
                 for fk in seed_fks:
                     target = fk.get("foreign_table")
                     if target and target in table_lookup and target not in selected:
                         result.append(table_lookup[target])
                         selected.add(target)
 
-            # 2. Incoming FKs (e.g. orders <- order_items, customers <- orders)
             for cat_table in catalog:
                 t_name = cat_table["table_name"]
                 if t_name not in selected:
@@ -194,40 +198,38 @@ class SchemaRAGService:
         return result
 
     async def retrieve_schemas(
-        self, prompt: str, tenant_id: str, pool: Any = None
+        self, prompt: str, tenant_id: str, pool: Any = None, api_key: str | None = None
     ) -> list[dict[str, Any]]:
-        """Hybrid vector search and graph-expanded schema context retrieval."""
-        prompt_vec = _pseudo_dense_embedding(prompt)
+        if pool is None:
+            logger.error("Live DB pool is required for schema retrieval in production.")
+            return []
 
-        # 1. Attempt live pgvector retrieval if connection pool is available
-        if pool is not None:
-            live_results = await self._query_live_pgvector(prompt_vec, tenant_id, pool)
-            if live_results:
-                return self._traverse_foreign_key_graph(live_results, self._seed_catalog)
+        # Try to discover live schema if not cached
+        if self._live_catalog is None:
+            await self._discover_schema_from_db(pool, tenant_id)
 
-        # 2. Local semantic vector retrieval using dense embeddings & cosine similarity
-        scored: list[tuple[float, dict[str, Any]]] = []
-        for table in self._seed_catalog:
-            table_vec = table.get("embedding", [])
-            similarity = _cosine_similarity(prompt_vec, table_vec)
-            scored.append((similarity, table))
+        try:
+            prompt_vec = await generate_embedding(prompt, api_key=api_key)
+        except Exception:
+            return []
 
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top_tables = [t for score, t in scored if score > 0.05][:2]
+        catalog = self._get_catalog()
 
-        if not top_tables:
-            top_tables = self._seed_catalog[:2]
+        # Attempt live pgvector retrieval
+        live_results = await self._query_live_pgvector(prompt_vec, tenant_id, pool)
+        if live_results:
+            return self._traverse_foreign_key_graph(live_results, catalog)
 
-        return self._traverse_foreign_key_graph(top_tables, self._seed_catalog)
+        return []
 
     async def sync_schema_catalog_to_db(
         self, tenant_id: str, pool: Any, api_key: str | None = None
     ) -> int:
-        """Populate or update schema_catalog table in PostgreSQL with 1536-dim vector embeddings for pgvector RAG."""
+        catalog = self._get_catalog()
         count = 0
         try:
             async with pool.acquire() as conn:
-                for table in self._seed_catalog:
+                for table in catalog:
                     t_name = table["table_name"]
                     t_desc = table.get("description", "")
                     for col in table.get("columns", []):
@@ -248,14 +250,7 @@ class SchemaRAGService:
                             VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8)
                             ON CONFLICT DO NOTHING;
                             """,
-                            tenant_id,
-                            t_name,
-                            c_name,
-                            c_type,
-                            is_pk,
-                            is_pii,
-                            desc_text,
-                            vec_str,
+                            tenant_id, t_name, c_name, c_type, is_pk, is_pii, desc_text, vec_str,
                         )
                         await conn.execute(
                             """
@@ -263,15 +258,11 @@ class SchemaRAGService:
                             SET embedding = $1, description = $2
                             WHERE tenant_id = $3::uuid AND table_name = $4 AND column_name = $5;
                             """,
-                            vec_str,
-                            desc_text,
-                            tenant_id,
-                            t_name,
-                            c_name,
+                            vec_str, desc_text, tenant_id, t_name, c_name,
                         )
                         count += 1
         except Exception as exc:
-            print(f"[Warning] Failed to sync schema catalog embeddings: {exc}")
+            logger.warning("Failed to sync schema catalog embeddings: %s", exc)
         return count
 
 
@@ -281,12 +272,12 @@ schema_rag_service = SchemaRAGService()
 async def retrieve_schema_context(
     prompt: str, tenant_id: str, pool: Any = None
 ) -> list[dict[str, Any]]:
-    """Public helper for schema retrieval in plan_node."""
-    return await schema_rag_service.retrieve_schemas(prompt, tenant_id, pool)
+    from app.config import get_settings
+    settings = get_settings()
+    return await schema_rag_service.retrieve_schemas(prompt, tenant_id, pool, api_key=settings.openai_api_key)
 
 
 async def sync_schema_catalog(
     tenant_id: str, pool: Any, api_key: str | None = None
 ) -> int:
-    """Public helper to sync schema catalog embeddings into PostgreSQL pgvector."""
     return await schema_rag_service.sync_schema_catalog_to_db(tenant_id, pool, api_key)

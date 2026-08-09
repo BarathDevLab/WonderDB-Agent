@@ -12,6 +12,7 @@ class AgentState(TypedDict, total=False):
 
     # Semantic Cache & Planning Phase
     cached_hit: bool
+    enable_cache: bool
     plan_strategy: str
     retrieved_schemas: list[dict[str, Any]]
     sql_query: str

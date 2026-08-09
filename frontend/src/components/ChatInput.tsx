@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Square, Sparkles, CornerDownLeft } from 'lucide-react';
+import { ArrowUp, Square, HelpCircle } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (prompt: string) => void;
@@ -7,28 +7,32 @@ interface ChatInputProps {
   isStreaming: boolean;
 }
 
-const PROMPT_SUGGESTIONS = [
+export const PROMPT_SUGGESTIONS = [
   { label: 'Monthly Revenue', prompt: 'Show me total revenue and monthly sales performance' },
   { label: 'Top Customers', prompt: 'Who are our top customers by total spent and what is their contact info?' },
   { label: 'Product Catalog', prompt: 'List available products and their pricing categories' },
   { label: 'Order Statuses', prompt: 'Calculate total order count grouped by order status' },
 ];
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSend, onCancel, isStreaming }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({
+  onSend,
+  onCancel,
+  isStreaming,
+}) => {
   const [prompt, setPrompt] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
     }
   }, [prompt]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim() || isStreaming) return;
-    onSend(prompt);
+    onSend(prompt.trim());
     setPrompt('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -43,67 +47,78 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, onCancel, isStream
   };
 
   return (
-    <div className="sticky bottom-0 z-30 w-full border-t border-white/[0.08] bg-[#070a13]/90 backdrop-blur-xl px-4 py-3 sm:px-6">
-      <div className="mx-auto max-w-4xl space-y-2.5">
-        {/* Quick Suggestion Pills */}
+    <div className="sticky bottom-0 z-20 w-full bg-gradient-to-t from-[#090a0d] via-[#090a0d]/95 to-transparent pt-3 pb-4 px-3 sm:px-6">
+      <div className="mx-auto max-w-3xl space-y-2.5">
+        {/* Suggestion Chips */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
-          <span className="flex items-center gap-1 text-[11px] font-mono text-slate-500 uppercase tracking-wider shrink-0 mr-1">
-            <Sparkles className="h-3 w-3 text-cyan-400" />
-            Quick:
+          <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider font-medium shrink-0 mr-1">
+            Presets:
           </span>
           {PROMPT_SUGGESTIONS.map((item) => (
             <button
               key={item.label}
               onClick={() => onSend(item.prompt)}
               disabled={isStreaming}
-              className="shrink-0 rounded-full border border-white/10 bg-slate-900/80 hover:bg-slate-800 hover:border-cyan-500/40 px-3 py-1 text-xs text-slate-300 hover:text-white transition-all disabled:opacity-40"
+              className="shrink-0 rounded-md border border-zinc-800 bg-zinc-900/80 hover:bg-zinc-800 hover:border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-40"
             >
               {item.label}
             </button>
           ))}
         </div>
 
-        {/* Input Area Form */}
-        <form onSubmit={handleSubmit} className="relative flex items-center">
-          <div className="relative flex w-full items-end rounded-2xl border border-white/10 bg-slate-900/90 shadow-2xl focus-within:border-cyan-500/60 focus-within:ring-2 focus-within:ring-cyan-500/20 transition-all">
+        {/* Input Box */}
+        <form onSubmit={handleSubmit} className="relative">
+          <div className="relative flex flex-col rounded-2xl border border-zinc-800 bg-[#121316] shadow-xl focus-within:border-zinc-600 focus-within:ring-1 focus-within:ring-zinc-600 transition-all">
             <textarea
               ref={textareaRef}
               rows={1}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask any question about your database (e.g. 'Show monthly sales trends')..."
+              placeholder="Ask anything about PostgreSQL schema or business metrics..."
               disabled={isStreaming}
-              className="w-full resize-none bg-transparent px-4 py-3.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none disabled:opacity-50 max-h-32"
+              className="w-full resize-none bg-transparent px-4 sm:px-5 pt-3.5 pb-2 text-xs sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none disabled:opacity-50 max-h-40 leading-relaxed"
             />
 
-            <div className="flex items-center gap-2 p-2.5">
-              {isStreaming ? (
-                <button
-                  type="button"
-                  onClick={onCancel}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition-all shadow-md active:scale-95"
-                  title="Stop Stream"
-                >
-                  <Square className="h-4 w-4" />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={!prompt.trim()}
-                  className="flex h-9 items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 px-3 text-xs font-semibold text-white transition-all hover:from-cyan-400 hover:to-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(6,182,212,0.3)] active:scale-95"
-                >
-                  <span>Query</span>
-                  <CornerDownLeft className="h-3.5 w-3.5" />
-                </button>
-              )}
+            {/* Bottom Actions Row inside Prompt Box */}
+            <div className="flex items-center justify-between px-3 sm:px-4 pb-2.5 pt-1">
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-500">
+                <span>pgvector RAG • AST Cost Gate</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-zinc-500 hidden md:inline">
+                  Enter ↵
+                </span>
+
+                {isStreaming ? (
+                  <button
+                    type="button"
+                    onClick={onCancel}
+                    className="flex h-7 w-7 items-center justify-center rounded-md bg-rose-600 hover:bg-rose-500 text-white transition-colors"
+                    title="Stop generation"
+                  >
+                    <Square className="h-3 w-3" />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!prompt.trim()}
+                    className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-100 hover:bg-white text-zinc-950 font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed active:scale-95"
+                    title="Execute query"
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </form>
 
-        <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
-          <span>Protected with SQL AST Validation, EXPLAIN Cost Gate & PII Redaction</span>
-          <span className="hidden sm:inline">Press Enter ↵ to send, Shift+Enter for multiline</span>
+        {/* Footer Microcopy */}
+        <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono px-1">
+          <span>Protected with pgvector RAG, AST static analysis & RLS isolation</span>
+          <span className="hidden sm:inline">PostgreSQL Copilot</span>
         </div>
       </div>
     </div>

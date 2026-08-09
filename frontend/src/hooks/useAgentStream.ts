@@ -1,16 +1,92 @@
-import { useState, useRef, useCallback } from 'react';
-import { ChatMessage } from '../types';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { ChatMessage, ChatSession } from '../types';
 
-export function useAgentStream() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+const STORAGE_KEY = 'ai_db_agent_sessions_v1';
+
+function getInitialSessions(): ChatSession[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load chat sessions from localStorage', e);
+  }
+  return [];
+}
+
+export function useAgentStream(initialTenantId: string) {
+  const [sessions, setSessions] = useState<ChatSession[]>(getInitialSessions);
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    const saved = getInitialSessions();
+    return saved.length > 0 ? saved[0].id : '';
+  });
   const [currentMessage, setCurrentMessage] = useState<ChatMessage | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const streamStartTimeRef = useRef<number>(0);
 
-  const clearHistory = useCallback(() => {
-    setMessages([]);
+  // Save to localStorage whenever sessions change
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    } catch (e) {
+      console.error('Failed to save sessions to localStorage', e);
+    }
+  }, [sessions]);
+
+  const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
+  const messages = activeSession ? activeSession.messages : [];
+
+  const createNewSession = useCallback((tenantId: string = initialTenantId) => {
+    const newSession: ChatSession = {
+      id: `session-${Date.now()}`,
+      title: 'New Database Query',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      tenant_id: tenantId,
+      messages: [],
+    };
+    setSessions((prev) => [newSession, ...prev]);
+    setActiveSessionId(newSession.id);
     setCurrentMessage(null);
+    return newSession.id;
+  }, [initialTenantId]);
+
+  const switchSession = useCallback((sessionId: string) => {
+    if (isStreaming) return;
+    setActiveSessionId(sessionId);
+    setCurrentMessage(null);
+  }, [isStreaming]);
+
+  const deleteSession = useCallback((sessionId: string) => {
+    setSessions((prev) => {
+      const updated = prev.filter((s) => s.id !== sessionId);
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(updated.length > 0 ? updated[0].id : '');
+      }
+      return updated;
+    });
+  }, [activeSessionId]);
+
+  const renameSession = useCallback((sessionId: string, newTitle: string) => {
+    if (!newTitle.trim()) return;
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle.trim(), updatedAt: Date.now() } : s))
+    );
   }, []);
+
+  const clearCurrentHistory = useCallback(() => {
+    if (activeSessionId) {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === activeSessionId ? { ...s, messages: [], updatedAt: Date.now() } : s))
+      );
+    }
+    setCurrentMessage(null);
+  }, [activeSessionId]);
 
   const cancelStream = useCallback(() => {
     if (abortControllerRef.current) {
@@ -18,22 +94,58 @@ export function useAgentStream() {
       abortControllerRef.current = null;
     }
     setIsStreaming(false);
-    if (currentMessage) {
-      setMessages((prev) => [
-        ...prev,
-        { ...currentMessage, isStreaming: false, statusMessage: 'Query stream cancelled by user.' },
-      ]);
+    if (currentMessage && activeSessionId) {
+      const elapsed = Math.max(0.5, (Date.now() - streamStartTimeRef.current) / 1000);
+      const finalized: ChatMessage = {
+        ...currentMessage,
+        isStreaming: false,
+        thoughtDurationSec: Number(elapsed.toFixed(1)),
+        statusMessage: 'Query stream stopped by user.',
+      };
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === activeSessionId ? { ...s, messages: [...s.messages, finalized], updatedAt: Date.now() } : s
+        )
+      );
       setCurrentMessage(null);
     }
-  }, [currentMessage]);
+  }, [currentMessage, activeSessionId]);
 
   const sendPrompt = useCallback(
     async (prompt: string, tenantId: string) => {
       if (!prompt.trim() || isStreaming) return;
 
+      let targetSessionId = activeSessionId;
+
+      // If no active session, create one
+      if (!targetSessionId || !sessions.some((s) => s.id === targetSessionId)) {
+        const title = prompt.length > 40 ? prompt.slice(0, 40) + '...' : prompt;
+        const newSession: ChatSession = {
+          id: `session-${Date.now()}`,
+          title,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          tenant_id: tenantId,
+          messages: [],
+        };
+        setSessions((prev) => [newSession, ...prev]);
+        setActiveSessionId(newSession.id);
+        targetSessionId = newSession.id;
+      } else {
+        // Auto-title if it's currently default and has no messages
+        const currentSess = sessions.find((s) => s.id === targetSessionId);
+        if (currentSess && currentSess.messages.length === 0 && currentSess.title === 'New Database Query') {
+          const title = prompt.length > 40 ? prompt.slice(0, 40) + '...' : prompt;
+          setSessions((prev) =>
+            prev.map((s) => (s.id === targetSessionId ? { ...s, title } : s))
+          );
+        }
+      }
+
       const userMsgId = `user-${Date.now()}`;
       const agentMsgId = `agent-${Date.now()}`;
-      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      streamStartTimeRef.current = Date.now();
 
       const userMsg: ChatMessage = {
         id: userMsgId,
@@ -43,7 +155,14 @@ export function useAgentStream() {
         tenant_id: tenantId,
       };
 
-      setMessages((prev) => [...prev, userMsg]);
+      // Append user message immediately
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === targetSessionId
+            ? { ...s, messages: [...s.messages, userMsg], tenant_id: tenantId, updatedAt: Date.now() }
+            : s
+        )
+      );
 
       let workingAgentMsg: ChatMessage = {
         id: agentMsgId,
@@ -52,7 +171,7 @@ export function useAgentStream() {
         prompt,
         tenant_id: tenantId,
         phase: 'planning',
-        statusMessage: 'Analyzing natural language prompt and retrieving schema catalog via pgvector...',
+        statusMessage: 'Searching schema catalog via pgvector dense embeddings...',
         isStreaming: true,
       };
 
@@ -156,7 +275,7 @@ export function useAgentStream() {
                   ...workingAgentMsg,
                   phase: 'reflecting',
                   retryCount: data.retry ?? (workingAgentMsg.retryCount || 0) + 1,
-                  statusMessage: `Self-Correction Triggered: ${data.error}. Re-prompting LLM with AST diagnostics...`,
+                  statusMessage: `Self-Correction Triggered: ${data.error}. Re-prompting with AST diagnostics...`,
                 };
                 setCurrentMessage({ ...workingAgentMsg });
                 break;
@@ -174,7 +293,7 @@ export function useAgentStream() {
                 workingAgentMsg = {
                   ...workingAgentMsg,
                   phase: 'error',
-                  errorMessage: data.message || 'Unknown execution error.',
+                  errorMessage: data.message || 'Execution error encountered.',
                 };
                 setCurrentMessage({ ...workingAgentMsg });
                 break;
@@ -201,20 +320,38 @@ export function useAgentStream() {
       } finally {
         setIsStreaming(false);
         abortControllerRef.current = null;
-        const finalized = { ...workingAgentMsg, isStreaming: false };
+        const elapsed = Math.max(0.5, (Date.now() - streamStartTimeRef.current) / 1000);
+        const finalized: ChatMessage = {
+          ...workingAgentMsg,
+          isStreaming: false,
+          thoughtDurationSec: Number(elapsed.toFixed(1)),
+        };
         setCurrentMessage(null);
-        setMessages((prev) => [...prev, finalized]);
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === targetSessionId
+              ? { ...s, messages: [...s.messages, finalized], updatedAt: Date.now() }
+              : s
+          )
+        );
       }
     },
-    [isStreaming]
+    [activeSessionId, isStreaming, sessions]
   );
 
   return {
+    sessions,
+    activeSessionId,
+    activeSession,
     messages,
     currentMessage,
     isStreaming,
     sendPrompt,
     cancelStream,
-    clearHistory,
+    createNewSession,
+    switchSession,
+    deleteSession,
+    renameSession,
+    clearCurrentHistory,
   };
 }

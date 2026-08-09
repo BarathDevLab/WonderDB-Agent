@@ -1,14 +1,20 @@
 import json
+import logging
+from collections import OrderedDict
 from typing import Any
+
 from db.redis import get_redis_client
+
+logger = logging.getLogger(__name__)
+
+
 
 
 class SessionMemoryService:
-    """Session history and conversational memory manager backed by Redis with in-memory fallback."""
+    """Session history manager backed by Redis."""
 
     def __init__(self, ttl_seconds: int = 86400) -> None:
         self._ttl = ttl_seconds
-        self._fallback_memory: dict[str, list[dict[str, Any]]] = {}
 
     async def append_session_event(self, session_id: str, event: dict[str, Any]) -> None:
         key = f"session:{session_id}:events"
@@ -16,14 +22,10 @@ class SessionMemoryService:
 
         try:
             client = await get_redis_client()
-            async with client:
-                await client.rpush(key, payload)
-                await client.expire(key, self._ttl)
-        except Exception:
-            # Resilient fallback to local memory if Redis is not running
-            if session_id not in self._fallback_memory:
-                self._fallback_memory[session_id] = []
-            self._fallback_memory[session_id].append(event)
+            await client.rpush(key, payload)
+            await client.expire(key, self._ttl)
+        except Exception as exc:
+            logger.error("Redis session append failed: %s", exc)
 
     async def get_session_history(
         self, session_id: str, limit: int = 20
@@ -32,12 +34,20 @@ class SessionMemoryService:
 
         try:
             client = await get_redis_client()
-            async with client:
-                raw_events = await client.lrange(key, -limit, -1)
-                return [json.loads(e) for e in raw_events]
-        except Exception:
-            events = self._fallback_memory.get(session_id, [])
-            return events[-limit:]
+            raw_events = await client.lrange(key, -limit, -1)
+            return [json.loads(e) for e in raw_events]
+        except Exception as exc:
+            logger.error("Redis session read failed: %s", exc)
+            return []
+
+
+    async def clear_session(self, session_id: str) -> None:
+        key = f"session:{session_id}:events"
+        try:
+            client = await get_redis_client()
+            await client.delete(key)
+        except Exception as exc:
+            logger.error("Redis session clear failed: %s", exc)
 
 
 session_memory_service = SessionMemoryService()
@@ -45,3 +55,7 @@ session_memory_service = SessionMemoryService()
 
 async def append_session_event(session_id: str, event: dict[str, Any]) -> None:
     await session_memory_service.append_session_event(session_id, event)
+
+
+async def clear_session_events(session_id: str) -> None:
+    await session_memory_service.clear_session(session_id)

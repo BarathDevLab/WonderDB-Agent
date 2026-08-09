@@ -1,8 +1,11 @@
 import json
+import logging
 from typing import Any
 from agent.state import AgentState
 from app.config import get_settings
-from db.postgres import PostgresPool
+from db.postgres import get_shared_pool
+
+logger = logging.getLogger(__name__)
 from services.schema_rag import retrieve_schema_context
 from services.semantic_cache import get_semantic_cache
 from services.session_memory import append_session_event
@@ -27,143 +30,131 @@ def _format_schema_ddl(schemas: list[dict[str, Any]]) -> str:
     return "\n\n".join(ddl_lines)
 
 
-async def _generate_sql_with_llm(
+async def _generate_sql_with_gemini(
     prompt: str,
     schemas: list[dict[str, Any]],
     error_message: str | None = None,
     api_key: str | None = None,
+    model: str = "gemini-flash-latest",
 ) -> tuple[str, str] | None:
-    """Generate dynamic SQL query using live OpenAI / LLM chat completion API."""
+    """Generate dynamic SQL query using Google Gemini API."""
     if not api_key:
         return None
 
     try:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=api_key)
+        import httpx
         ddl_context = _format_schema_ddl(schemas)
-
         system_instruction = (
             "You are an enterprise Text-to-SQL AI assistant. "
-            "Your task is to translate natural language user questions into a single valid, safe PostgreSQL SELECT statement. "
-            "Rules:\n"
-            "1. Output ONLY a valid JSON object with keys 'strategy' and 'sql'.\n"
-            "2. The SQL must be a strict SELECT statement. Disallow any DML or data modifications.\n"
-            "3. Use appropriate JOINs adhering to foreign key relationships.\n"
-            "4. Limit unbounded results to at most 100 rows."
+            "Translate the natural language user question into a single valid, safe PostgreSQL SELECT statement. "
+            "Output ONLY a valid JSON object with keys 'strategy' and 'sql'. "
+            "The SQL must be a strict SELECT query with appropriate JOINs and LIMIT <= 100."
         )
 
         user_content = f"Database Schemas:\n{ddl_context}\n\nUser Question: {prompt}"
         if error_message:
             user_content += f"\n\nPrevious Attempt Failed With: {error_message}\nPlease fix and adjust the SQL accordingly."
 
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0.0,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_content},
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": f"{system_instruction}\n\n{user_content}\n\nOutput JSON strictly formatted as: {{\"strategy\": \"...\", \"sql\": \"...\"}}"}]
+                }
             ],
-        )
+            "generationConfig": {
+                "temperature": 0.0,
+                "responseMimeType": "application/json",
+            }
+        }
 
-        raw_content = response.choices[0].message.content or "{}"
-        parsed = json.loads(raw_content)
-        sql = parsed.get("sql", "").strip()
-        strategy = parsed.get("strategy", "LLM synthesized SQL query")
-        if sql:
-            return sql, strategy
-    except Exception:
-        # Fall back to deterministic synthesis if API error occurs
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.post(url, json=payload)
+            if res.status_code != 200:
+                return None
+            data = res.json()
+            raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if raw_text.startswith("```json"):
+                raw_text = raw_text[7:]
+            if raw_text.startswith("```"):
+                raw_text = raw_text[3:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+            parsed = json.loads(raw_text.strip())
+            sql = parsed.get("sql", "").strip()
+            strategy = parsed.get("strategy", "Gemini synthesized SQL query")
+            if sql:
+                return sql, strategy
+    except Exception as exc:
+        logger.warning("Gemini SQL generation failed: %s", exc)
         return None
+    return None
+
+
+async def _generate_sql_with_llm(
+    prompt: str,
+    schemas: list[dict[str, Any]],
+    error_message: str | None = None,
+    api_key: str | None = None,
+    gemini_key: str | None = None,
+    gemini_model: str = "gemini-flash-latest",
+) -> tuple[str, str] | None:
+    """Generate dynamic SQL query using Gemini, OpenAI, or LLM chat completion API."""
+    # 1. Try Gemini if configured
+    if gemini_key:
+        res = await _generate_sql_with_gemini(
+            prompt, schemas, error_message, gemini_key, gemini_model
+        )
+        if res:
+            return res
+
+    # 2. Try OpenAI if configured
+    if api_key:
+        try:
+            from openai import AsyncOpenAI
+
+            client = AsyncOpenAI(api_key=api_key)
+            ddl_context = _format_schema_ddl(schemas)
+
+            system_instruction = (
+                "You are an enterprise Text-to-SQL AI assistant. "
+                "Your task is to translate natural language user questions into a single valid, safe PostgreSQL SELECT statement. "
+                "Rules:\n"
+                "1. Output ONLY a valid JSON object with keys 'strategy' and 'sql'.\n"
+                "2. The SQL must be a strict SELECT statement. Disallow any DML or data modifications.\n"
+                "3. Use appropriate JOINs adhering to foreign key relationships.\n"
+                "4. Limit unbounded results to at most 100 rows."
+            )
+
+            user_content = f"Database Schemas:\n{ddl_context}\n\nUser Question: {prompt}"
+            if error_message:
+                user_content += f"\n\nPrevious Attempt Failed With: {error_message}\nPlease fix and adjust the SQL accordingly."
+
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                temperature=0.0,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_content},
+                ],
+            )
+
+            raw_content = response.choices[0].message.content or "{}"
+            parsed = json.loads(raw_content)
+            sql = parsed.get("sql", "").strip()
+            strategy = parsed.get("strategy", "LLM synthesized SQL query")
+            if sql:
+                return sql, strategy
+        except Exception as exc:
+            logger.warning("Gemini SQL generation failed: %s", exc)
+            return None
 
     return None
 
 
-def _generate_candidate_sql_fallback(
-    prompt: str,
-    schemas: list[dict[str, Any]],
-    error_message: str | None = None,
-) -> tuple[str, str]:
-    """Deterministic fallback synthesis used for offline testing or when API key is unavailable."""
-    p_lower = prompt.lower()
-    table_names = {s["table_name"] for s in schemas}
 
-    # If this is a self-correction retry, apply targeted repairs
-    if error_message:
-        if "missing" in error_message.lower() or "not found" in error_message.lower():
-            if "orders" in table_names and "customers" in table_names:
-                return (
-                    "SELECT c.full_name, SUM(o.total_amount) AS total_spent "
-                    "FROM customers c JOIN orders o ON c.id = o.customer_id "
-                    "GROUP BY c.full_name ORDER BY total_spent DESC LIMIT 10",
-                    "Self-corrected join between customers and orders",
-                )
-
-    if "month" in p_lower:
-        strategy = "Aggregate monthly order totals"
-        sql = (
-            "SELECT DATE_TRUNC('month', created_at) AS order_month, SUM(total_amount) AS monthly_revenue "
-            "FROM orders "
-            "GROUP BY order_month "
-            "ORDER BY order_month DESC LIMIT 12"
-        )
-        return sql, strategy
-
-    if "revenue" in p_lower or "sales" in p_lower or "spent" in p_lower or "total" in p_lower:
-        if "orders" in table_names and "customers" in table_names:
-            strategy = "Aggregate orders joined with customers for tenant spending analytics"
-            sql = (
-                "SELECT c.full_name, SUM(o.total_amount) AS total_revenue "
-                "FROM customers c "
-                "JOIN orders o ON c.id = o.customer_id "
-                "WHERE o.status = 'completed' "
-                "GROUP BY c.full_name "
-                "ORDER BY total_revenue DESC LIMIT 10"
-            )
-            return sql, strategy
-        elif "orders" in table_names:
-            strategy = "Aggregate monthly order totals"
-            sql = (
-                "SELECT DATE_TRUNC('month', created_at) AS order_month, SUM(total_amount) AS monthly_revenue "
-                "FROM orders "
-                "GROUP BY order_month "
-                "ORDER BY order_month DESC LIMIT 12"
-            )
-            return sql, strategy
-
-    if "count" in p_lower or "how many" in p_lower:
-        if "customers" in p_lower:
-            return "SELECT COUNT(*) AS total_customers FROM customers", "Scalar customer count"
-        if "orders" in p_lower:
-            return "SELECT status, COUNT(*) AS order_count FROM orders GROUP BY status", "Grouped order status count"
-        if "products" in p_lower:
-            return "SELECT category, COUNT(*) AS product_count FROM products GROUP BY category", "Grouped product category count"
-
-    if "product" in p_lower or "item" in p_lower or "sku" in p_lower or "catalog" in p_lower:
-        if "products" in table_names:
-            return (
-                "SELECT sku, name, category, price FROM products ORDER BY price DESC LIMIT 20",
-                "Product catalog and inventory pricing strategy",
-            )
-
-    if "customer" in p_lower or "user" in p_lower or "account" in p_lower:
-        if "customers" in table_names:
-            return (
-                "SELECT id, full_name, email, created_at FROM customers ORDER BY created_at DESC LIMIT 20",
-                "Customer profile accounts retrieval strategy",
-            )
-
-    # Default fallback safe SELECT
-    if "orders" in table_names:
-        return (
-            "SELECT id, total_amount, status, created_at FROM orders ORDER BY created_at DESC LIMIT 20",
-            "Recent orders retrieval strategy",
-        )
-    return (
-        "SELECT id, full_name, created_at FROM customers ORDER BY created_at DESC LIMIT 20",
-        "Recent customers retrieval strategy",
-    )
 
 
 async def plan_node(state: AgentState) -> AgentState:
@@ -173,8 +164,11 @@ async def plan_node(state: AgentState) -> AgentState:
     session_id = state.get("session_id", f"session-{tenant_id}")
     error_message = state.get("error_message")
 
+    settings = get_settings()
+    cache_enabled = state.get("enable_cache", settings.enable_semantic_cache)
+
     # 1. Semantic Cache Gate (Fast Return check)
-    if not error_message:
+    if cache_enabled and not error_message:
         cached = await get_semantic_cache(prompt, tenant_id)
         if cached:
             sql_query = cached.get("sql_query", "")
@@ -197,22 +191,31 @@ async def plan_node(state: AgentState) -> AgentState:
             }
 
     # 2. Schema RAG Retrieval (Live PostgreSQL pgvector + FK graph traversal)
-    pool = PostgresPool()
+    pool = await get_shared_pool()
     retrieved_schemas = await retrieve_schema_context(prompt, tenant_id, pool)
 
-    # 3. Dynamic LLM Generation (with deterministic offline fallback)
-    settings = get_settings()
+    # 3. Dynamic LLM Generation (Gemini / OpenAI / deterministic fallback)
     llm_result = await _generate_sql_with_llm(
         prompt=prompt,
         schemas=retrieved_schemas,
         error_message=error_message,
         api_key=settings.openai_api_key,
+        gemini_key=settings.gemini_api_key,
+        gemini_model=settings.gemini_model,
     )
 
-    if llm_result:
-        sql_query, strategy = llm_result
-    else:
-        sql_query, strategy = _generate_candidate_sql_fallback(prompt, retrieved_schemas, error_message)
+    if not llm_result:
+        # Fail loudly if LLM fails or no API keys are provided
+        error_msg = "Failed to generate SQL. Please ensure valid API keys (Gemini/OpenAI) are configured."
+        return {
+            **state,
+            "cached_hit": False,
+            "retrieved_schemas": retrieved_schemas,
+            "error_message": error_msg,
+            "current_phase": "planning_failed",
+        }
+
+    sql_query, strategy = llm_result
 
     # 4. Append to Session Memory
     await append_session_event(

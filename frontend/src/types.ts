@@ -52,6 +52,16 @@ export interface ChatMessage {
   retryCount?: number;
   isStreaming?: boolean;
   cachedHit?: boolean;
+  thoughtDurationSec?: number;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  tenant_id: string;
+  messages: ChatMessage[];
 }
 
 export interface Tenant {
@@ -59,4 +69,5 @@ export interface Tenant {
   name: string;
   tier: string;
   recordCount: number;
+  color?: string;
 }
