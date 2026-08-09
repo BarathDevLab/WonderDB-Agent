@@ -32,7 +32,7 @@ class SemanticCacheService:
         self, prompt: str, payload: dict[str, Any], tenant_id: str = "default"
     ) -> None:
         key = self._hash_key(prompt, tenant_id)
-        encoded = json.dumps(payload)
+        encoded = json.dumps(payload, default=str)
         try:
             client = await get_redis_client()
             async with client:
@@ -40,12 +40,26 @@ class SemanticCacheService:
         except Exception:
             self._local_cache[key] = payload
 
+    async def delete(self, prompt: str, tenant_id: str = "default") -> None:
+        key = self._hash_key(prompt, tenant_id)
+        self._local_cache.pop(key, None)
+        try:
+            client = await get_redis_client()
+            async with client:
+                await client.delete(key)
+        except Exception:
+            pass
+
 
 semantic_cache_service = SemanticCacheService()
 
 
 async def get_semantic_cache(prompt: str, tenant_id: str = "default") -> dict[str, Any] | None:
     return await semantic_cache_service.get(prompt, tenant_id)
+
+
+async def delete_semantic_cache(prompt: str, tenant_id: str = "default") -> None:
+    await semantic_cache_service.delete(prompt, tenant_id)
 
 
 async def set_semantic_cache(

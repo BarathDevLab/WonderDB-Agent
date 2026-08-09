@@ -18,16 +18,16 @@ ON CONFLICT DO NOTHING;
 -- Insert Sample Products
 INSERT INTO products (id, tenant_id, sku, name, category, price)
 VALUES
-    ('p0010000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PROD-001', 'Enterprise Analytics Suite', 'Software', 1250.00),
-    ('p0020000-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PROD-002', 'Cloud Storage Pro 1TB', 'Cloud Services', 450.00)
+    ('e0010000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PROD-001', 'Enterprise Analytics Suite', 'Software', 1250.00),
+    ('e0020000-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'PROD-002', 'Cloud Storage Pro 1TB', 'Cloud Services', 450.00)
 ON CONFLICT DO NOTHING;
 
 -- Insert Sample Orders
 INSERT INTO orders (id, tenant_id, customer_id, total_amount, status, created_at)
 VALUES
-    ('o0010000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0010000-0000-0000-0000-000000000001', 1250.00, 'completed', NOW() - INTERVAL '3 months'),
-    ('o0020000-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0010000-0000-0000-0000-000000000001', 450.00, 'completed', NOW() - INTERVAL '2 months'),
-    ('o0030000-0000-0000-0000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0020000-0000-0000-0000-000000000002', 3100.00, 'completed', NOW() - INTERVAL '1 month')
+    ('f0010000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0010000-0000-0000-0000-000000000001', 1250.00, 'completed', NOW() - INTERVAL '3 months'),
+    ('f0020000-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0010000-0000-0000-0000-000000000001', 450.00, 'completed', NOW() - INTERVAL '2 months'),
+    ('f0030000-0000-0000-0000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0020000-0000-0000-0000-000000000002', 3100.00, 'completed', NOW() - INTERVAL '1 month')
 ON CONFLICT DO NOTHING;
 
 -- Insert Schema Catalog Metadata for RAG

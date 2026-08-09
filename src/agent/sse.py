@@ -31,10 +31,25 @@ async def run_langgraph_sse(
                             "sql": state_update.get("sql_query", ""),
                         },
                     )
-                    yield format_sse_event(
-                        "status",
-                        {"phase": "executing", "message": "Validating AST & executing query..."},
-                    )
+                    if state_update.get("cached_hit"):
+                        results = state_update.get("raw_results", [])
+                        yield format_sse_event(
+                            "execution_complete",
+                            {
+                                "rows": len(results),
+                                "data": results,
+                                "cost": 0.0,
+                            },
+                        )
+                        yield format_sse_event(
+                            "status",
+                            {"phase": "summarizing", "message": "Synthesizing answer from cached execution..."},
+                        )
+                    else:
+                        yield format_sse_event(
+                            "status",
+                            {"phase": "executing", "message": "Validating AST & executing query..."},
+                        )
 
                 elif node_name == "execute":
                     if state_update.get("error_message"):

@@ -1,5 +1,12 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
+import sys
+
+# Ensure src root is in sys.path for direct uvicorn invocations
+_src_root = str(Path(__file__).resolve().parent.parent)
+if _src_root not in sys.path:
+    sys.path.insert(0, _src_root)
 
 from fastapi import FastAPI
 

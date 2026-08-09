@@ -1,5 +1,8 @@
+from datetime import date, datetime
+from decimal import Decimal
 import json
 from typing import Any
+from uuid import UUID
 from agent.state import AgentState
 from app.config import get_settings
 from core.ast_validator import validate_sql
@@ -54,8 +57,8 @@ async def _execute_against_live_postgres(
 
     try:
         async with pool.acquire() as conn:
-            # 1. Set multi-tenant session isolation
-            await conn.execute("SET LOCAL app.current_tenant_id = $1", tenant_id)
+            # 1. Set multi-tenant session isolation using set_config
+            await conn.execute("SELECT set_config('app.current_tenant_id', $1, true);", tenant_id)
 
             # 2. Run real EXPLAIN (FORMAT JSON) cost gate
             explain_records = await conn.fetch(f"EXPLAIN (FORMAT JSON) {sql}")
@@ -71,7 +74,17 @@ async def _execute_against_live_postgres(
 
             # 3. Execute actual SELECT query
             records = await conn.fetch(sql)
-            results = [dict(r) for r in records]
+            results: list[dict[str, Any]] = []
+            for r in records:
+                row: dict[str, Any] = {}
+                for k, v in r.items():
+                    if isinstance(v, Decimal):
+                        row[k] = float(v)
+                    elif isinstance(v, (datetime, date, UUID)):
+                        row[k] = str(v)
+                    else:
+                        row[k] = v
+                results.append(row)
             return results, estimated_cost
     except Exception:
         # Fallback to sandbox if live database is unreachable

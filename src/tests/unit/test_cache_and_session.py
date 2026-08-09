@@ -2,7 +2,11 @@ import pytest
 
 from agent.graph import get_graph
 from agent.state import AgentState
-from services.semantic_cache import get_semantic_cache, set_semantic_cache
+from services.semantic_cache import (
+    delete_semantic_cache,
+    get_semantic_cache,
+    set_semantic_cache,
+)
 from services.session_memory import session_memory_service
 
 
@@ -11,6 +15,7 @@ async def test_semantic_cache_lifecycle() -> None:
     prompt = "What is the average order value?"
     tenant_id = "tenant-cache-test"
 
+    await delete_semantic_cache(prompt, tenant_id)
     cached_before = await get_semantic_cache(prompt, tenant_id)
     assert cached_before is None
 

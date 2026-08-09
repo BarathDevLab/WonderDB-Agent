@@ -1,6 +1,6 @@
 import asyncio
-import os
 from pathlib import Path
+from typing import Any
 import asyncpg
 
 from app.config import get_settings
@@ -23,9 +23,35 @@ class MigrationManager:
             """
         )
 
+    async def _ensure_database_exists(self, cfg: Any) -> None:
+        """Create target database if it does not exist by connecting to maintenance db."""
+        try:
+            conn = await asyncpg.connect(
+                user=cfg.postgres_user,
+                password=cfg.postgres_password,
+                host=cfg.postgres_host,
+                port=cfg.postgres_port,
+                database="postgres",
+            )
+            try:
+                db_exists = await conn.fetchval(
+                    "SELECT 1 FROM pg_database WHERE datname = $1;", cfg.postgres_db
+                )
+                if not db_exists:
+                    print(f"Database '{cfg.postgres_db}' does not exist. Creating database...")
+                    # Cannot create database inside a transaction block
+                    await conn.execute(f'CREATE DATABASE "{cfg.postgres_db}";')
+                    print(f"  [OK] Database '{cfg.postgres_db}' created successfully.")
+            finally:
+                await conn.close()
+        except Exception as exc:
+            # If connecting to maintenance db fails or database already exists, proceed
+            print(f"[Notice] Database existence check: {exc}")
+
     async def run_migrations(self, settings: None = None) -> list[str]:
         """Discover and execute pending SQL migration files in numerical order."""
         cfg = settings or get_settings()
+        await self._ensure_database_exists(cfg)
         print(f"Connecting to PostgreSQL database: {cfg.postgres_host}:{cfg.postgres_port}/{cfg.postgres_db}...")
 
         conn = await asyncpg.connect(
@@ -65,7 +91,7 @@ class MigrationManager:
                         "INSERT INTO schema_migrations (version) VALUES ($1);",
                         version_name,
                     )
-                print(f"  ✓ {version_name} applied successfully.")
+                print(f"  [OK] {version_name} applied successfully.")
                 executed.append(version_name)
 
             if not executed:

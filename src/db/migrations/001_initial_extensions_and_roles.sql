@@ -1,7 +1,19 @@
 -- Migration 001: Initial Extensions and Execution Roles
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Enable pgvector if available, otherwise setup fallback domain
+DO $$
+BEGIN
+    BEGIN
+        CREATE EXTENSION IF NOT EXISTS vector;
+    EXCEPTION WHEN OTHERS THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector') THEN
+            CREATE DOMAIN vector AS text;
+        END IF;
+    END;
+END
+$$;
 
 -- Low-privilege read-only runner role for safe query execution
 DO $$

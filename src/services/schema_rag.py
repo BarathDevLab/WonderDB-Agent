@@ -15,8 +15,8 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _pseudo_dense_embedding(text: str, dimensions: int = 128) -> list[float]:
-    """Deterministic, lightweight dense vector embedding for semantic matching."""
+def _pseudo_dense_embedding(text: str, dimensions: int = 1536) -> list[float]:
+    """Deterministic, lightweight 1536-dim dense vector embedding for semantic matching and pgvector compatibility."""
     tokens = re.findall(r"\w+", text.lower())
     vec = [0.0] * dimensions
     for i, token in enumerate(tokens):
@@ -28,6 +28,22 @@ def _pseudo_dense_embedding(text: str, dimensions: int = 128) -> list[float]:
     if norm > 0:
         vec = [v / norm for v in vec]
     return vec
+
+
+async def generate_embedding(text: str, api_key: str | None = None) -> list[float]:
+    """Generate dense 1536-dim vector embedding using OpenAI or local deterministic fallback."""
+    if api_key:
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=api_key)
+            resp = await client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text,
+            )
+            return resp.data[0].embedding
+        except Exception:
+            pass
+    return _pseudo_dense_embedding(text, dimensions=1536)
 
 
 class SchemaRAGService:
@@ -196,8 +212,61 @@ class SchemaRAGService:
         if not top_tables:
             top_tables = self._seed_catalog[:2]
 
-        # 3. Traverse FK graph to attach related join tables
         return self._traverse_foreign_key_graph(top_tables, self._seed_catalog)
+
+    async def sync_schema_catalog_to_db(
+        self, tenant_id: str, pool: Any, api_key: str | None = None
+    ) -> int:
+        """Populate or update schema_catalog table in PostgreSQL with 1536-dim vector embeddings for pgvector RAG."""
+        count = 0
+        try:
+            async with pool.acquire() as conn:
+                for table in self._seed_catalog:
+                    t_name = table["table_name"]
+                    t_desc = table.get("description", "")
+                    for col in table.get("columns", []):
+                        c_name = col["name"]
+                        c_type = col["type"]
+                        is_pk = col.get("is_pk", False)
+                        is_pii = col.get("is_pii", False)
+                        desc_text = f"Table {t_name} column {c_name} ({c_type}) - {t_desc}"
+                        vec = await generate_embedding(desc_text, api_key=api_key)
+                        vec_str = "[" + ",".join(str(v) for v in vec) + "]"
+
+                        await conn.execute(
+                            """
+                            INSERT INTO schema_catalog (
+                                tenant_id, table_name, column_name, data_type,
+                                is_primary_key, is_pii, description, embedding
+                            )
+                            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8)
+                            ON CONFLICT DO NOTHING;
+                            """,
+                            tenant_id,
+                            t_name,
+                            c_name,
+                            c_type,
+                            is_pk,
+                            is_pii,
+                            desc_text,
+                            vec_str,
+                        )
+                        await conn.execute(
+                            """
+                            UPDATE schema_catalog
+                            SET embedding = $1, description = $2
+                            WHERE tenant_id = $3::uuid AND table_name = $4 AND column_name = $5;
+                            """,
+                            vec_str,
+                            desc_text,
+                            tenant_id,
+                            t_name,
+                            c_name,
+                        )
+                        count += 1
+        except Exception as exc:
+            print(f"[Warning] Failed to sync schema catalog embeddings: {exc}")
+        return count
 
 
 schema_rag_service = SchemaRAGService()
@@ -208,3 +277,10 @@ async def retrieve_schema_context(
 ) -> list[dict[str, Any]]:
     """Public helper for schema retrieval in plan_node."""
     return await schema_rag_service.retrieve_schemas(prompt, tenant_id, pool)
+
+
+async def sync_schema_catalog(
+    tenant_id: str, pool: Any, api_key: str | None = None
+) -> int:
+    """Public helper to sync schema catalog embeddings into PostgreSQL pgvector."""
+    return await schema_rag_service.sync_schema_catalog_to_db(tenant_id, pool, api_key)

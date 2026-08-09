@@ -1,5 +1,3 @@
-import pytest
-from pathlib import Path
 from db.migrator import MigrationManager
 
 

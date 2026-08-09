@@ -2,6 +2,7 @@ import json
 from typing import Any
 from agent.state import AgentState
 from app.config import get_settings
+from db.postgres import PostgresPool
 from services.schema_rag import retrieve_schema_context
 from services.semantic_cache import get_semantic_cache
 from services.session_memory import append_session_event
@@ -136,6 +137,22 @@ def _generate_candidate_sql_fallback(
             return "SELECT COUNT(*) AS total_customers FROM customers", "Scalar customer count"
         if "orders" in p_lower:
             return "SELECT status, COUNT(*) AS order_count FROM orders GROUP BY status", "Grouped order status count"
+        if "products" in p_lower:
+            return "SELECT category, COUNT(*) AS product_count FROM products GROUP BY category", "Grouped product category count"
+
+    if "product" in p_lower or "item" in p_lower or "sku" in p_lower or "catalog" in p_lower:
+        if "products" in table_names:
+            return (
+                "SELECT sku, name, category, price FROM products ORDER BY price DESC LIMIT 20",
+                "Product catalog and inventory pricing strategy",
+            )
+
+    if "customer" in p_lower or "user" in p_lower or "account" in p_lower:
+        if "customers" in table_names:
+            return (
+                "SELECT id, full_name, email, created_at FROM customers ORDER BY created_at DESC LIMIT 20",
+                "Customer profile accounts retrieval strategy",
+            )
 
     # Default fallback safe SELECT
     if "orders" in table_names:
@@ -169,6 +186,7 @@ async def plan_node(state: AgentState) -> AgentState:
             return {
                 **state,
                 "cached_hit": True,
+                "ast_valid": True,
                 "plan_strategy": strategy,
                 "sql_query": sql_query,
                 "raw_results": cached.get("raw_results", []),
@@ -178,8 +196,9 @@ async def plan_node(state: AgentState) -> AgentState:
                 "current_phase": "planning_complete",
             }
 
-    # 2. Schema RAG Retrieval (Dense vector search + FK graph traversal)
-    retrieved_schemas = await retrieve_schema_context(prompt, tenant_id)
+    # 2. Schema RAG Retrieval (Live PostgreSQL pgvector + FK graph traversal)
+    pool = PostgresPool()
+    retrieved_schemas = await retrieve_schema_context(prompt, tenant_id, pool)
 
     # 3. Dynamic LLM Generation (with deterministic offline fallback)
     settings = get_settings()

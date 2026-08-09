@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS schema_catalog (
     foreign_column VARCHAR(128),
     is_pii BOOLEAN DEFAULT FALSE,
     description TEXT,
-    embedding vector(1536),
+    embedding vector,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

@@ -3,8 +3,19 @@
 -- ============================================================================
 
 -- 1. Enable Vector Extension for Schema RAG
-CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+DO $$
+BEGIN
+    BEGIN
+        CREATE EXTENSION IF NOT EXISTS vector;
+    EXCEPTION WHEN OTHERS THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector') THEN
+            CREATE DOMAIN vector AS text;
+        END IF;
+    END;
+END
+$$;
 
 -- 2. Create Low-Privilege Read-Only Runner Role
 DO $$
@@ -40,7 +51,7 @@ CREATE TABLE IF NOT EXISTS schema_catalog (
     foreign_column VARCHAR(128),
     is_pii BOOLEAN DEFAULT FALSE,
     description TEXT,
-    embedding vector(1536),
+    embedding vector,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
