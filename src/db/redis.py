@@ -13,4 +13,4 @@ async def get_redis_client() -> Any:
     if Redis is None:
         raise RuntimeError("Redis package is not installed.")
     settings = get_settings()
-    return Redis.from_url(settings.redis_url)
+    return Redis.from_url(settings.redis_url, protocol=2)

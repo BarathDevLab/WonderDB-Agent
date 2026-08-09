@@ -118,10 +118,14 @@ async def summarize_node(state: AgentState) -> AgentState:
     sql_query = state.get("sql_query", "")
     error_message = state.get("error_message")
 
-    settings = get_settings()
-    llm_summary = await _synthesize_with_llm(prompt, raw_results, settings.openai_api_key)
-    summary = llm_summary or _synthesize_summary_fallback(prompt, raw_results, error_message)
-    chart_spec = _build_chart_spec(raw_results)
+    if state.get("cached_hit") and state.get("summary"):
+        summary = state["summary"]
+        chart_spec = state.get("chart_spec") or _build_chart_spec(raw_results)
+    else:
+        settings = get_settings()
+        llm_summary = await _synthesize_with_llm(prompt, raw_results, settings.openai_api_key)
+        summary = llm_summary or _synthesize_summary_fallback(prompt, raw_results, error_message)
+        chart_spec = _build_chart_spec(raw_results)
 
     # 1. Update Semantic Cache for future instant lookups (if query executed successfully)
     if not error_message and raw_results:

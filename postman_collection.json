@@ -1,0 +1,103 @@
+{
+  "info": {
+    "_postman_id": "ai-database-assistant-v1",
+    "name": "AI Database Assistant - Text-to-SQL SSE API",
+    "description": "Postman Collection for testing FastAPI Text-to-SQL SSE endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/api/v1/health",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "v1",
+            "health"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET Stream Agent Query (SSE)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/api/v1/agent/stream?prompt=Show monthly revenue&tenant_id=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "v1",
+            "agent",
+            "stream"
+          ],
+          "query": [
+            {
+              "key": "prompt",
+              "value": "Show monthly revenue"
+            },
+            {
+              "key": "tenant_id",
+              "value": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST Stream Agent Query (SSE)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"prompt\": \"Who are top customers by total spent?\",\n  \"tenant_id\": \"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11\",\n  \"user_id\": \"user-postman-01\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8000/api/v1/agent/stream",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "v1",
+            "agent",
+            "stream"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

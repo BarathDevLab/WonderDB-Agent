@@ -17,12 +17,16 @@ class PostgresPool:
         if self._pool is not None:
             return
 
-        self._pool = await asyncpg.create_pool(
-            dsn=self._settings.postgres_dsn,
-            min_size=1,
-            max_size=10,
-            command_timeout=10,
-        )
+        try:
+            self._pool = await asyncpg.create_pool(
+                dsn=self._settings.postgres_dsn,
+                min_size=1,
+                max_size=10,
+                command_timeout=10,
+            )
+        except Exception as exc:
+            print(f"[Warning] Could not connect to PostgreSQL: {exc}. Operating in offline/mock mode.")
+            self._pool = None
 
     async def disconnect(self) -> None:
         if self._pool is None:

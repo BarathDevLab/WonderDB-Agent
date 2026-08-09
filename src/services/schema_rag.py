@@ -146,17 +146,28 @@ class SchemaRAGService:
     def _traverse_foreign_key_graph(
         self, initial_tables: list[dict[str, Any]], catalog: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """Graph traversal attaching connected lookup tables via FK edges."""
+        """Graph traversal attaching connected lookup tables via FK edges (both directions)."""
         table_lookup = {t["table_name"]: t for t in catalog}
         selected = {t["table_name"] for t in initial_tables}
         result = list(initial_tables)
 
-        for table in initial_tables:
+        # 1. Outgoing FKs (e.g., orders -> customers)
+        for table in list(initial_tables):
             for fk in table.get("foreign_keys", []):
                 target = fk.get("foreign_table")
                 if target and target in table_lookup and target not in selected:
                     result.append(table_lookup[target])
                     selected.add(target)
+
+        # 2. Incoming FKs (e.g., customers <- orders)
+        for cat_table in catalog:
+            t_name = cat_table["table_name"]
+            if t_name not in selected:
+                for fk in cat_table.get("foreign_keys", []):
+                    if fk.get("foreign_table") in selected:
+                        result.append(cat_table)
+                        selected.add(t_name)
+                        break
 
         return result
 
