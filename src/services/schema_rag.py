@@ -139,14 +139,16 @@ class SchemaRAGService:
                 records = await conn.fetch(query, str(prompt_embedding), tenant_id)
                 # Group columns into table schemas
                 tables: dict[str, dict[str, Any]] = {}
+                table_lookup = {t["table_name"]: t for t in self._seed_catalog}
                 for r in records:
                     t_name = r["table_name"]
                     if t_name not in tables:
+                        seed_table = table_lookup.get(t_name, {})
                         tables[t_name] = {
                             "table_name": t_name,
                             "columns": [],
-                            "foreign_keys": [],
-                            "description": r["description"] or "",
+                            "foreign_keys": seed_table.get("foreign_keys", []),
+                            "description": r["description"] or seed_table.get("description", ""),
                         }
                     tables[t_name]["columns"].append(
                         {
@@ -162,28 +164,32 @@ class SchemaRAGService:
     def _traverse_foreign_key_graph(
         self, initial_tables: list[dict[str, Any]], catalog: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """Graph traversal attaching connected lookup tables via FK edges (both directions)."""
+        """Multi-hop graph traversal attaching connected lookup tables via FK edges (both directions)."""
         table_lookup = {t["table_name"]: t for t in catalog}
         selected = {t["table_name"] for t in initial_tables}
         result = list(initial_tables)
 
-        # 1. Outgoing FKs (e.g., orders -> customers)
-        for table in list(initial_tables):
-            for fk in table.get("foreign_keys", []):
-                target = fk.get("foreign_table")
-                if target and target in table_lookup and target not in selected:
-                    result.append(table_lookup[target])
-                    selected.add(target)
+        # Multi-hop traversal (depth = 2)
+        for _ in range(2):
+            for table in list(result):
+                t_name = table["table_name"]
+                seed_fks = table_lookup.get(t_name, {}).get("foreign_keys", [])
+                # 1. Outgoing FKs (e.g. order_items -> orders -> customers)
+                for fk in seed_fks:
+                    target = fk.get("foreign_table")
+                    if target and target in table_lookup and target not in selected:
+                        result.append(table_lookup[target])
+                        selected.add(target)
 
-        # 2. Incoming FKs (e.g., customers <- orders)
-        for cat_table in catalog:
-            t_name = cat_table["table_name"]
-            if t_name not in selected:
-                for fk in cat_table.get("foreign_keys", []):
-                    if fk.get("foreign_table") in selected:
-                        result.append(cat_table)
-                        selected.add(t_name)
-                        break
+            # 2. Incoming FKs (e.g. orders <- order_items, customers <- orders)
+            for cat_table in catalog:
+                t_name = cat_table["table_name"]
+                if t_name not in selected:
+                    for fk in cat_table.get("foreign_keys", []):
+                        if fk.get("foreign_table") in selected:
+                            result.append(cat_table)
+                            selected.add(t_name)
+                            break
 
         return result
 
