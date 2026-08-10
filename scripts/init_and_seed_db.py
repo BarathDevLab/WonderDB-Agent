@@ -26,7 +26,7 @@ async def init_and_seed() -> None:
             "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
             "b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22",
         ]:
-            count = await sync_schema_catalog(tenant_id, pool, api_key=settings.openai_api_key)
+            count = await sync_schema_catalog(tenant_id, pool, api_key=settings.gemini_api_key)
             print(f"  [OK] Synchronized {count} pgvector schema embeddings for tenant {tenant_id}.")
 
         await pool.disconnect()

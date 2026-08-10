@@ -66,3 +66,12 @@ CREATE INDEX IF NOT EXISTS idx_orders_tenant_id ON orders(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_schema_catalog_tenant_id ON schema_catalog(tenant_id);
+
+-- Required by ON CONFLICT (tenant_id, table_name, column_name) DO UPDATE in schema_rag.py
+CREATE UNIQUE INDEX IF NOT EXISTS uq_schema_catalog_tenant_table_column
+    ON schema_catalog (tenant_id, table_name, column_name);
+
+-- HNSW vector index for fast ANN cosine search (pgvector >= 0.5)
+CREATE INDEX IF NOT EXISTS idx_schema_catalog_embedding_hnsw
+    ON schema_catalog USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
