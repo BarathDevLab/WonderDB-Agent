@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     enable_semantic_cache: bool = Field(default=True, alias="ENABLE_SEMANTIC_CACHE")
 
-    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-flash-latest", alias="GEMINI_MODEL")
+    gemini_model: str = Field(default="", alias="GEMINI_MODEL")
+    gemini_embedding_model: str = Field(default="", alias="GEMINI_EMBEDDING_MODEL")
     app_api_key: str = Field(default="", alias="APP_API_KEY")
     max_prompt_length: int = Field(default=2000, alias="MAX_PROMPT_LENGTH")
 

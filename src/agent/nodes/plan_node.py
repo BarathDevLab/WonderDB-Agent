@@ -35,7 +35,7 @@ async def _generate_sql_with_gemini(
     schemas: list[dict[str, Any]],
     error_message: str | None = None,
     api_key: str | None = None,
-    model: str = "gemini-flash-latest",
+    model: str = "",
 ) -> tuple[str, str] | None:
     """Generate dynamic SQL query using Google Gemini API."""
     if not api_key:
@@ -55,7 +55,6 @@ async def _generate_sql_with_gemini(
         if error_message:
             user_content += f"\n\nPrevious Attempt Failed With: {error_message}\nPlease fix and adjust the SQL accordingly."
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         payload = {
             "contents": [
                 {
@@ -69,10 +68,15 @@ async def _generate_sql_with_gemini(
             }
         }
 
+        if not model:
+            return None
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
         async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(url, json=payload)
             if res.status_code != 200:
                 return None
+
             data = res.json()
             raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
             if raw_text.startswith("```json"):
@@ -96,60 +100,12 @@ async def _generate_sql_with_llm(
     prompt: str,
     schemas: list[dict[str, Any]],
     error_message: str | None = None,
-    api_key: str | None = None,
     gemini_key: str | None = None,
-    gemini_model: str = "gemini-flash-latest",
+    gemini_model: str = "",
 ) -> tuple[str, str] | None:
-    """Generate dynamic SQL query using Gemini, OpenAI, or LLM chat completion API."""
-    # 1. Try Gemini if configured
+    """Generate dynamic SQL query using Gemini API."""
     if gemini_key:
-        res = await _generate_sql_with_gemini(
-            prompt, schemas, error_message, gemini_key, gemini_model
-        )
-        if res:
-            return res
-
-    # 2. Try OpenAI if configured
-    if api_key:
-        try:
-            from openai import AsyncOpenAI
-
-            client = AsyncOpenAI(api_key=api_key)
-            ddl_context = _format_schema_ddl(schemas)
-
-            system_instruction = (
-                "You are an enterprise Text-to-SQL AI assistant. "
-                "Your task is to translate natural language user questions into a single valid, safe PostgreSQL SELECT statement. "
-                "Rules:\n"
-                "1. Output ONLY a valid JSON object with keys 'strategy' and 'sql'.\n"
-                "2. The SQL must be a strict SELECT statement. Disallow any DML or data modifications.\n"
-                "3. Use appropriate JOINs adhering to foreign key relationships.\n"
-                "4. Limit unbounded results to at most 100 rows."
-            )
-
-            user_content = f"Database Schemas:\n{ddl_context}\n\nUser Question: {prompt}"
-            if error_message:
-                user_content += f"\n\nPrevious Attempt Failed With: {error_message}\nPlease fix and adjust the SQL accordingly."
-
-            response = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_content},
-                ],
-            )
-
-            raw_content = response.choices[0].message.content or "{}"
-            parsed = json.loads(raw_content)
-            sql = parsed.get("sql", "").strip()
-            strategy = parsed.get("strategy", "LLM synthesized SQL query")
-            if sql:
-                return sql, strategy
-        except Exception as exc:
-            logger.warning("Gemini SQL generation failed: %s", exc)
-            return None
+        return await _generate_sql_with_gemini(prompt, schemas, error_message, gemini_key, gemini_model)
 
     return None
 
@@ -194,19 +150,18 @@ async def plan_node(state: AgentState) -> AgentState:
     pool = await get_shared_pool()
     retrieved_schemas = await retrieve_schema_context(prompt, tenant_id, pool)
 
-    # 3. Dynamic LLM Generation (Gemini / OpenAI / deterministic fallback)
+    # 3. Dynamic LLM Generation (Gemini)
     llm_result = await _generate_sql_with_llm(
         prompt=prompt,
         schemas=retrieved_schemas,
         error_message=error_message,
-        api_key=settings.openai_api_key,
         gemini_key=settings.gemini_api_key,
         gemini_model=settings.gemini_model,
     )
 
     if not llm_result:
-        # Fail loudly if LLM fails or no API keys are provided
-        error_msg = "Failed to generate SQL. Please ensure valid API keys (Gemini/OpenAI) are configured."
+        # Fail loudly if Gemini fails or no API key is provided
+        error_msg = "Failed to generate SQL. Please ensure a valid Gemini API key and model are configured."
         return {
             **state,
             "cached_hit": False,
