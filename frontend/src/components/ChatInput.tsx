@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowUp, Square, HelpCircle } from 'lucide-react';
+import { ArrowUp, Square, HelpCircle, Mic, MicOff } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (prompt: string) => void;
@@ -20,7 +20,60 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   isStreaming,
 }) => {
   const [prompt, setPrompt] = useState('');
+  const [isListening, setIsListening] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
+
+  const toggleListening = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        try {
+          const recognition = new SpeechRecognition();
+          // Change continuous to false. Some browsers/OS combinations kill continuous immediately.
+          recognition.continuous = false;
+          recognition.interimResults = false;
+
+          recognition.onstart = () => {
+            setIsListening(true);
+          };
+
+          recognition.onresult = (event: any) => {
+            const transcript = event.results[event.results.length - 1][0].transcript;
+            setPrompt((prev) => prev + (prev && !prev.endsWith(' ') ? ' ' : '') + transcript);
+          };
+
+          recognition.onerror = (event: any) => {
+            console.error("Speech recognition error:", event.error);
+            if (event.error !== 'no-speech') {
+              alert("Microphone error: " + event.error + ". Make sure you are on localhost or HTTPS, and have granted permissions.");
+            }
+            setIsListening(false);
+          };
+
+          recognition.onend = () => {
+            setIsListening(false);
+          };
+
+          recognitionRef.current = recognition;
+          recognition.start();
+        } catch (e) {
+          console.error("Failed to start speech recognition:", e);
+          setIsListening(false);
+        }
+      } else {
+        alert("Speech recognition is not supported in this browser.");
+      }
+    }
+  };
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -31,6 +84,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isListening) recognitionRef.current?.stop();
     if (!prompt.trim() || isStreaming) return;
     onSend(prompt.trim());
     setPrompt('');
@@ -90,6 +144,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 <span className="text-[10px] font-mono text-zinc-500 hidden md:inline">
                   Enter ↵
                 </span>
+
+                <button
+                  type="button"
+                  onClick={toggleListening}
+                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                    isListening
+                      ? 'bg-rose-500/20 text-rose-500 animate-pulse'
+                      : 'bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-300'
+                  }`}
+                  title={isListening ? "Stop listening" : "Start voice input"}
+                >
+                  {isListening ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
+                </button>
 
                 {isStreaming ? (
                   <button
