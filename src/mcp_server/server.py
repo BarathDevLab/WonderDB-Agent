@@ -27,7 +27,13 @@ if _src_root not in sys.path:
 
 import uuid as _uuid
 import httpx
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    try:
+        from fastmcp import FastMCP
+    except ImportError:
+        from mcp.server import FastMCP
 
 logger = logging.getLogger(__name__)
 
