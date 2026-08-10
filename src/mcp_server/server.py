@@ -563,12 +563,15 @@ async def explain_data(prompt: str, raw_results: list[dict[str, Any]]) -> str:
             "Output ONLY valid JSON: {\"summary\": \"...\", \"key_metrics\": [\"...\", ...]}"
         )
         user_content = f"Question: {prompt}\nDataset (first 10 rows): {json.dumps(raw_results[:10])}"
+        model_name = settings.gemini_model.strip()
+        if model_name.startswith("models/"):
+            model_name = model_name[len("models/"):]
         payload = {
             "contents": [{"role": "user", "parts": [{"text": f"{system_instruction}\n\n{user_content}"}]}],
             "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
         }
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-               f"{settings.gemini_model}:generateContent?key={settings.gemini_api_key}")
+               f"{model_name}:generateContent?key={settings.gemini_api_key}")
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(url, json=payload)

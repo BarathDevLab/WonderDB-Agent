@@ -35,12 +35,15 @@ async def _call_gemini(system_instruction: str, user_content: str) -> str:
         return "I'm here to help! Ask me to query your database, generate charts, or draw ER diagrams."
 
     try:
+        model_name = settings.gemini_model.strip()
+        if model_name.startswith("models/"):
+            model_name = model_name[len("models/"):]
         payload = {
             "contents": [{"role": "user", "parts": [{"text": f"{system_instruction}\n\n{user_content}"}]}],
             "generationConfig": {"temperature": 0.7},
         }
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-               f"{settings.gemini_model}:generateContent?key={settings.gemini_api_key}")
+               f"{model_name}:generateContent?key={settings.gemini_api_key}")
         async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(url, json=payload)
             if res.status_code == 200:

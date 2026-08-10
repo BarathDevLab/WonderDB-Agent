@@ -121,12 +121,16 @@ async def _classify_intent(
                 "Generate corrected SQL."
             )
 
+        clean_model = model.strip()
+        if clean_model.startswith("models/"):
+            clean_model = clean_model[len("models/"):]
+
         payload = {
             "contents": [{"role": "user", "parts": [{"text": f"{_SYSTEM_PROMPT}\n\n{user_content}"}]}],
             "generationConfig": {"temperature": 0.0, "responseMimeType": "application/json"},
         }
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-               f"{model}:generateContent?key={api_key}")
+               f"{clean_model}:generateContent?key={api_key}")
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(url, json=payload)

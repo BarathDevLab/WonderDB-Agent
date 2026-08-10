@@ -90,12 +90,15 @@ async def generate_embedding(text: str, api_key: str, model: str) -> list[float]
     Raises:
         ValueError: If the API returns a non-200 response.
     """
+    clean_model = model.strip()
+    if clean_model.startswith("models/"):
+        clean_model = clean_model[len("models/"):]
     url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+        f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}"
         f":embedContent?key={api_key}"
     )
     payload = {
-        "model": f"models/{model}",
+        "model": f"models/{clean_model}",
         "content": {"parts": [{"text": text}]},
     }
     client = _get_httpx_client()
