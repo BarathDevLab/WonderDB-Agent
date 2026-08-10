@@ -15,6 +15,7 @@ An enterprise-grade, multi-tenant **Text-to-SQL Platform** built for modern data
   - [Option B: Manual Local Setup](#option-b-manual-local-setup)
 - [🐍 Backend Setup (Python & Pip)](#-backend-setup-python--pip)
 - [💻 Frontend Setup](#-frontend-setup)
+- [☁️ Render Cloud Deployment](#-render-cloud-deployment)
 - [🔑 Environment Variables](#-environment-variables)
 - [🔌 API Endpoints & Usage](#-api-endpoints--usage)
 - [🛠️ Utility Scripts](#️-utility-scripts)
@@ -276,6 +277,25 @@ The application will start at `http://localhost:5173/`. Open your browser and na
 ```bash
 npm run build
 ```
+
+---
+
+## ☁️ Render Cloud Deployment
+
+The repository includes a ready-to-use [`render.yaml`](file:///c:/Users/chida/OneDrive/Desktop/project/ai-agent-database/render.yaml) Infrastructure Blueprint file for deploying the complete stack to [Render](https://render.com) with one click.
+
+### Quick Blueprint Deployment:
+1. Push your repository to **GitHub** or **GitLab**.
+2. Go to [Render Dashboard](https://dashboard.render.com/) $\rightarrow$ Click **New +** $\rightarrow$ **Blueprint**.
+3. Connect your repository. Render will automatically provision:
+   - **PostgreSQL Database** with `pgvector`
+   - **Redis Cache**
+   - **FastAPI Backend Web Service**
+   - **React Static Site Frontend**
+4. Provide your **`GEMINI_API_KEY`** when prompted for environment variables.
+5. Click **Apply**. Render handles installation, migrations, and service linking automatically!
+
+> For full step-by-step manual deployment instructions, see the detailed [Render Deployment Guide](file:///c:/Users/chida/OneDrive/Desktop/project/ai-agent-database/docs/RENDER_DEPLOYMENT.md).
 
 ---
 

@@ -1,0 +1,77 @@
+# ===================================================
+# Render Infrastructure Blueprint (render.yaml)
+# AI Database Agent - Full Stack Deployment
+# ===================================================
+
+services:
+  # 1. FastAPI Backend Web Service
+  - type: web
+    name: ai-agent-backend
+    runtime: python
+    region: singapore # Options: oregon, frankfurt, singapore, ohio
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python scripts/init_and_seed_db.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir src
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: ai-agent-postgres
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: ai-agent-postgres
+          property: port
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: ai-agent-postgres
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: ai-agent-postgres
+          property: password
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: ai-agent-postgres
+          property: database
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-agent-redis
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-1.5-flash
+      - key: GEMINI_EMBEDDING_MODEL
+        value: text-embedding-004
+      - key: ENABLE_SEMANTIC_CACHE
+        value: "true"
+
+  # 2. React Frontend Static Site
+  - type: web
+    name: ai-agent-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # 3. Redis Cache Instance
+  - type: redis
+    name: ai-agent-redis
+    region: singapore
+    plan: free
+    maxMemoryPolicy: allkeys-lru
+
+databases:
+  # 4. Managed PostgreSQL Database (with pgvector support)
+  - name: ai-agent-postgres
+    databaseName: enterprise_db
+    user: postgres
+    region: singapore
+    plan: free

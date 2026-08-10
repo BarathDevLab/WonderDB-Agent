@@ -1,25 +1,42 @@
-FROM python:3.12-slim
+# ==========================================
+# AI Database Agent - Backend Dockerfile
+# ==========================================
 
+FROM python:3.11-slim
+
+# Set environment variables for Python execution
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src
+
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install essential system dependencies (curl for healthchecks, build tools for native extensions)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential && \
-    rm -rf /var/lib/apt/lists/*
+    curl \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir poetry && \
-    poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-ansi --no-root --only main
+# Copy requirements file first to leverage Docker layer caching
+COPY requirements.txt .
 
-# Copy source code
+# Upgrade pip and install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy application source code and helper scripts
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 COPY main.py ./
 
-# Copy frontend build if present
-COPY frontend/dist/ ./frontend/dist/ 2>/dev/null || true
-
+# Expose backend port
 EXPOSE 8000
 
+# Container healthcheck
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Start the uvicorn development/production server bound to all interfaces
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "src"]
