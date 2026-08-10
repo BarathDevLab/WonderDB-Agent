@@ -69,7 +69,7 @@ async def _synthesize_with_gemini(
     prompt: str,
     raw_results: list[dict[str, Any]],
     api_key: str | None = None,
-    model: str = "gemini-flash-latest",
+    model: str = "",
 ) -> str | None:
     """Use Gemini API to formulate natural language summary of query results."""
     if not api_key or not raw_results:
@@ -77,7 +77,6 @@ async def _synthesize_with_gemini(
 
     try:
         import httpx
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         system_instruction = (
             "You are a senior data analyst. Given a user question and dataset, provide a concise 2-sentence executive summary highlighting key metrics."
         )
@@ -93,6 +92,10 @@ async def _synthesize_with_gemini(
                 "temperature": 0.2,
             }
         }
+
+        if not model:
+            return None
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(url, json=payload)
@@ -110,46 +113,15 @@ async def _synthesize_with_gemini(
 async def _synthesize_with_llm(
     prompt: str,
     raw_results: list[dict[str, Any]],
-    api_key: str | None = None,
     gemini_key: str | None = None,
-    gemini_model: str = "gemini-1.5-flash",
+    gemini_model: str = "",
 ) -> str | None:
-    """Use live LLM (Gemini or OpenAI) to formulate clear, natural language synthesis of data results."""
+    """Use Gemini to formulate clear, natural language synthesis of data results."""
     if not raw_results:
         return None
 
-    # 1. Try Gemini
     if gemini_key:
-        res = await _synthesize_with_gemini(prompt, raw_results, gemini_key, gemini_model)
-        if res:
-            return res
-
-    # 2. Try OpenAI
-    if api_key:
-        try:
-            from openai import AsyncOpenAI
-
-            client = AsyncOpenAI(api_key=api_key)
-            response = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.2,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a senior data analyst. Given a user question and query results dataset, provide a concise 2-sentence executive summary highlighting key findings.",
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Question: {prompt}\nDataset: {raw_results[:10]}",
-                    },
-                ],
-            )
-            content = response.choices[0].message.content
-            if content:
-                return content.strip()
-        except Exception as exc:
-            logger.warning("LLM synthesis failed: %s", exc)
-            return None
+        return await _synthesize_with_gemini(prompt, raw_results, gemini_key, gemini_model)
 
     return None
 
@@ -180,7 +152,6 @@ async def summarize_node(state: AgentState) -> AgentState:
         llm_summary = await _synthesize_with_llm(
             prompt,
             raw_results,
-            api_key=settings.openai_api_key,
             gemini_key=settings.gemini_api_key,
             gemini_model=settings.gemini_model,
         )
