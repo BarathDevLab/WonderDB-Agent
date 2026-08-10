@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from app.config import get_settings
 from db.postgres import PostgresPool
-from services.schema_rag import schema_rag_service
+from services.schema_rag import sync_schema_catalog
 
 ACME_TENANT = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
 GLOBEX_TENANT = "b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22"
@@ -35,7 +35,7 @@ async def main():
 
         print("[2/2] Synchronizing complete 1536-d schema_catalog embeddings across all tenants...")
         for tenant in [ACME_TENANT, GLOBEX_TENANT]:
-            n = await schema_rag_service.sync_schema_catalog_to_db(tenant, pool)
+            n = await sync_schema_catalog(tenant, pool)
             print(f"      Tenant {tenant[:8]}... synced {n} column vector embeddings.")
 
     await pool.disconnect()

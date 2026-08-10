@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-flash-latest", alias="GEMINI_MODEL")
+    gemini_embedding_model: str = Field(default="text-embedding-004", alias="GEMINI_EMBEDDING_MODEL")
     app_api_key: str = Field(default="", alias="APP_API_KEY")
     max_prompt_length: int = Field(default=2000, alias="MAX_PROMPT_LENGTH")
 
