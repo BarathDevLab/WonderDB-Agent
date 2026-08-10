@@ -9,7 +9,7 @@ from app.config import get_settings
 
 async def init_and_seed() -> None:
     settings = get_settings()
-    print(f"Connecting to PostgreSQL at {settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}...")
+    print(f"Connecting to PostgreSQL database '{settings.postgres_db}' at {settings.postgres_host}:{settings.postgres_port}...")
 
     try:
         from db.migrator import MigrationManager

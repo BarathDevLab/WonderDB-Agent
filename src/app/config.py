@@ -1,3 +1,4 @@
+from typing import Any
 from functools import lru_cache
 from pathlib import Path
 
@@ -37,6 +38,24 @@ class Settings(BaseSettings):
     gemini_embedding_model: str = Field(default="", alias="GEMINI_EMBEDDING_MODEL")
     app_api_key: str = Field(default="", alias="APP_API_KEY")
     max_prompt_length: int = Field(default=2000, alias="MAX_PROMPT_LENGTH")
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.database_url:
+            from urllib.parse import urlparse
+            try:
+                parsed = urlparse(self.database_url)
+                if parsed.hostname:
+                    self.postgres_host = parsed.hostname
+                if parsed.port:
+                    self.postgres_port = parsed.port
+                if parsed.username:
+                    self.postgres_user = parsed.username
+                if parsed.password:
+                    self.postgres_password = parsed.password
+                if parsed.path and parsed.path.strip("/"):
+                    self.postgres_db = parsed.path.strip("/")
+            except Exception:
+                pass
 
     @property
     def postgres_dsn(self) -> str:
