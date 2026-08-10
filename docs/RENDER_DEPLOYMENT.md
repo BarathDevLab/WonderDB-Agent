@@ -1,96 +1,68 @@
-# 🚀 Deploying AI Database Agent on Render
+# 🚀 Deploying FastAPI Backend on Render Free Tier
 
-This guide walks you through deploying the complete **AI Database Agent** stack (FastAPI Backend, React Frontend, PostgreSQL with `pgvector`, and Redis) to [Render](https://render.com).
-
----
-
-## 📑 Deployment Methods
-
-You can deploy to Render using two methods:
-1. **Method 1: One-Click Blueprint Deployment (Recommended)** – Uses [`render.yaml`](../render.yaml) to automatically provision and connect all 4 services.
-2. **Method 2: Manual Dashboard Setup** – Step-by-step setup via the Render Web Dashboard.
+This guide walks you through deploying **only the FastAPI Backend** service of the **AI Database Agent** on **Render's Free Tier**.
 
 ---
 
-## ⚡ Method 1: Blueprint Deployment (Fastest)
+## ⚡ Quick Blueprint Deployment (Backend Only)
 
-1. **Push your code to GitHub / GitLab**.
-2. Log in to [Render Dashboard](https://dashboard.render.com/).
+The project includes a streamlined [`render.yaml`](../render.yaml) configured specifically for the backend service.
+
+### Step-by-Step Blueprint Instructions:
+
+1. **Push your repository to GitHub / GitLab**.
+2. Log in to your [Render Dashboard](https://dashboard.render.com/).
 3. Click **New +** $\rightarrow$ **Blueprint**.
-4. Connect your GitHub repository containing this project.
-5. Render will automatically detect [`render.yaml`](../render.yaml) and display 4 services to create:
-   - **PostgreSQL Database** (`ai-agent-postgres`)
-   - **Redis Instance** (`ai-agent-redis`)
-   - **FastAPI Web Service** (`ai-agent-backend`)
-   - **React Static Site** (`ai-agent-frontend`)
-6. When prompted for environment variables, enter your **`GEMINI_API_KEY`**.
-7. Click **Apply**. Render will automatically provision databases, install dependencies, run migrations, and deploy both frontend and backend services!
+4. Select your repository.
+5. Render will automatically detect [`render.yaml`](../render.yaml) and configure the `ai-agent-backend` Web Service.
+6. Enter your environment variables when prompted:
+   - `DATABASE_URL`: Your PostgreSQL connection string (e.g. from Render PostgreSQL, Neon.tech, or Supabase).
+   - `REDIS_URL`: Your Redis connection string (e.g. from Upstash Redis or Render Redis).
+   - `GEMINI_API_KEY`: Your Google Gemini API Key.
+7. Click **Apply**. Render will install dependencies, initialize database tables (`python scripts/init_and_seed_db.py`), and deploy your FastAPI app on the Free Web Service tier!
 
 ---
 
-## 🛠️ Method 2: Manual Step-by-Step Setup
+## 🛠️ Manual Web Service Deployment (Render Dashboard)
 
-If you prefer provisioning services manually via the Render UI:
+If you prefer creating the Web Service manually via Render UI:
 
-### Step 1: Create Managed PostgreSQL Database
-1. Go to **New +** $\rightarrow$ **PostgreSQL**.
-2. Name: `ai-agent-postgres`
-3. Database Name: `enterprise_db`
-4. User: `postgres`
-5. Select Region and Plan (Free tier supported).
-6. Click **Create Database**.
-7. Once created, copy the **Internal Database URL** and credentials.
-8. Enable `pgvector`: In Render PostgreSQL Shell or psql, run:
-   ```sql
-   CREATE EXTENSION IF NOT EXISTS vector;
-   ```
-
-### Step 2: Create Managed Redis Cache
-1. Go to **New +** $\rightarrow$ **Redis**.
-2. Name: `ai-agent-redis`
-3. Select Region and Plan.
-4. Click **Create Redis**.
-5. Copy the **Internal Redis URL** (`redis://...`).
-
-### Step 3: Deploy FastAPI Backend Web Service
-1. Go to **New +** $\rightarrow$ **Web Service**.
-2. Connect your repository.
-3. Settings:
+1. Go to [Render Dashboard](https://dashboard.render.com/) $\rightarrow$ Click **New +** $\rightarrow$ **Web Service**.
+2. Connect your Git repository.
+3. Configure the following settings:
    - **Name**: `ai-agent-backend`
-   - **Environment**: `Python 3` (or `Docker`)
-   - **Build Command**: `pip install --upgrade pip && pip install -r requirements.txt`
-   - **Start Command**: `python scripts/init_and_seed_db.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir src`
-4. Add **Environment Variables**:
-   - `POSTGRES_HOST`: *(From PostgreSQL Host)*
-   - `POSTGRES_PORT`: `5432`
-   - `POSTGRES_USER`: `postgres`
-   - `POSTGRES_PASSWORD`: *(From PostgreSQL Password)*
-   - `POSTGRES_DB`: `enterprise_db`
-   - `REDIS_URL`: *(From Redis Internal URL)*
-   - `GEMINI_API_KEY`: `<Your-Google-Gemini-API-Key>`
-   - `GEMINI_MODEL`: `gemini-1.5-flash`
-   - `GEMINI_EMBEDDING_MODEL`: `text-embedding-004`
-   - `ENABLE_SEMANTIC_CACHE`: `true`
+   - **Language / Environment**: `Python 3`
+   - **Region**: Select nearest region (e.g., `Singapore`, `Oregon`, `Frankfurt`)
+   - **Branch**: `main`
+   - **Build Command**: 
+     ```bash
+     pip install --upgrade pip && pip install -r requirements.txt
+     ```
+   - **Start Command**: 
+     ```bash
+     python scripts/init_and_seed_db.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir src
+     ```
+   - **Instance Type**: **Free**
+
+4. **Environment Variables**:
+   Under **Environment Variables**, click **Add Environment Variable** for each:
+
+   | Variable Name | Example Value / Description |
+   | :--- | :--- |
+   | `PYTHON_VERSION` | `3.11.8` |
+   | `DATABASE_URL` | `postgresql://user:pass@ep-xyz.neon.tech/enterprise_db?sslmode=require` |
+   | `REDIS_URL` | `rediss://default:password@xyz.upstash.io:6379` |
+   | `GEMINI_API_KEY` | `AIzaSy...` *(Your Gemini API Key)* |
+   | `GEMINI_MODEL` | `gemini-1.5-flash` |
+   | `GEMINI_EMBEDDING_MODEL` | `text-embedding-004` |
+   | `ENABLE_SEMANTIC_CACHE` | `true` |
+
 5. Click **Create Web Service**.
 
-### Step 4: Deploy React Frontend Static Site
-1. Go to **New +** $\rightarrow$ **Static Site**.
-2. Connect your repository.
-3. Settings:
-   - **Name**: `ai-agent-frontend`
-   - **Root Directory**: `frontend`
-   - **Build Command**: `npm install && npm run build`
-   - **Publish Directory**: `dist`
-4. Set Redirects/Rewrites rule for single-page app (SPA):
-   - **Source**: `/*`
-   - **Destination**: `/index.html`
-   - **Action**: `Rewrite`
-5. Click **Create Static Site**.
-
 ---
 
-## 🔍 Verification & Post-Deployment
+## 💡 Free Tier Tips & Best Practices
 
-1. Check backend health endpoint: `https://<your-backend-name>.onrender.com/health`
-2. Open frontend URL: `https://<your-frontend-name>.onrender.com`
-3. Submit a test query like: `"Show sales volume by category"` to test end-to-end SSE streaming and database access.
+1. **Cold Starts**: Render's free web services automatically spin down after 15 minutes of inactivity. The first request after spin-down takes ~30-50 seconds to warm up.
+2. **PostgreSQL & Redis Connections**: You can use free hosted databases like [Neon.tech](https://neon.tech) / [Supabase](https://supabase.com) for PostgreSQL (with `pgvector`), and [Upstash Redis](https://upstash.com) for Redis caching.
+3. **Health Check Verification**: Once deployed, verify your service by navigating to `https://<your-render-app-name>.onrender.com/health`.

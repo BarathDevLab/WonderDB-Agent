@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     env: str = Field(default="development", alias="ENV")
     port: int = Field(default=8000, alias="PORT")
 
+    database_url: str = Field(default="", alias="DATABASE_URL")
+
     postgres_host: str = Field(default="localhost", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_user: str = Field(default="postgres", alias="POSTGRES_USER")
@@ -38,6 +40,8 @@ class Settings(BaseSettings):
 
     @property
     def postgres_dsn(self) -> str:
+        if self.database_url:
+            return self.database_url
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
