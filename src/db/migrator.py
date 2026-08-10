@@ -31,6 +31,9 @@ class MigrationManager:
 
     async def _ensure_database_exists(self, cfg: Any) -> None:
         """Create target database if it does not exist by connecting to maintenance db."""
+        if getattr(cfg, "database_url", None) or (cfg.postgres_host not in ("localhost", "127.0.0.1", "")):
+            # Managed cloud databases (Render, Neon, Supabase) pre-create the target database
+            return
         try:
             conn = await asyncpg.connect(
                 user=cfg.postgres_user,
@@ -45,28 +48,20 @@ class MigrationManager:
                 )
                 if not db_exists:
                     print(f"Database '{cfg.postgres_db}' does not exist. Creating database...")
-                    # Cannot create database inside a transaction block
                     await conn.execute(f'CREATE DATABASE "{cfg.postgres_db}";')
                     print(f"  [OK] Database '{cfg.postgres_db}' created successfully.")
             finally:
                 await conn.close()
         except Exception as exc:
-            # If connecting to maintenance db fails or database already exists, proceed
             print(f"[Notice] Database existence check: {exc}")
 
     async def run_migrations(self, settings: None = None) -> list[str]:
         """Discover and execute pending SQL migration files in numerical order."""
         cfg = settings or get_settings()
         await self._ensure_database_exists(cfg)
-        print(f"Connecting to PostgreSQL database: {cfg.postgres_host}:{cfg.postgres_port}/{cfg.postgres_db}...")
+        print(f"Connecting to PostgreSQL database via DSN...")
 
-        conn = await asyncpg.connect(
-            user=cfg.postgres_user,
-            password=cfg.postgres_password,
-            host=cfg.postgres_host,
-            port=cfg.postgres_port,
-            database=cfg.postgres_db,
-        )
+        conn = await asyncpg.connect(dsn=cfg.postgres_dsn)
 
         try:
             await self._ensure_migrations_table(conn)
