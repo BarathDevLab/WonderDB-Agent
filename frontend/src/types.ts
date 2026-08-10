@@ -34,6 +34,17 @@ export interface ChartSpec {
   options?: any;
 }
 
+export interface DiagramSpec {
+  mermaid?: string;
+  diagram_type?: 'er' | 'process' | 'decision';
+}
+
+export interface ToolCall {
+  tool: string;
+  status: string;
+  duration_ms?: number;
+}
+
 export interface ChatMessage {
   id: string;
   timestamp: string;
@@ -48,6 +59,8 @@ export interface ChatMessage {
   rawResults?: Record<string, any>[];
   summary?: string;
   chartSpec?: ChartSpec;
+  diagramSpec?: DiagramSpec;
+  toolCalls?: ToolCall[];
   errorMessage?: string;
   retryCount?: number;
   isStreaming?: boolean;

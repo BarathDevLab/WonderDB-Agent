@@ -45,10 +45,20 @@ async def run_langgraph_sse(
                             "status",
                             {"phase": "summarizing", "message": "Synthesizing answer from cached execution..."},
                         )
-                    else:
+                    elif state_update.get("needs_sql"):
                         yield format_sse_event(
                             "status",
                             {"phase": "executing", "message": "Validating AST & executing query..."},
+                        )
+                    elif state_update.get("intent") == "schema":
+                        yield format_sse_event(
+                            "status",
+                            {"phase": "summarizing", "message": "Generating schema diagram..."},
+                        )
+                    elif state_update.get("intent") in ("chat", "contextual"):
+                        yield format_sse_event(
+                            "status",
+                            {"phase": "summarizing", "message": "Formulating response..."},
                         )
 
                 elif node_name == "execute":
@@ -91,13 +101,16 @@ async def run_langgraph_sse(
                         },
                     )
 
-                elif node_name == "summarize":
+                elif node_name in ("chat", "summarize"):
                     yield format_sse_event(
                         "final_response",
                         {
                             "summary": state_update.get("summary", ""),
                             "chart_spec": state_update.get("chart_spec", {}),
+                            "diagram_spec": state_update.get("diagram_spec", {}),
+                            "tool_calls": state_update.get("tool_calls", []),
                         },
                     )
 
     yield format_sse_event("complete", {"ok": True})
+

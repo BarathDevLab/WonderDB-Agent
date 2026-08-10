@@ -285,6 +285,8 @@ export function useAgentStream(initialTenantId: string) {
                   ...workingAgentMsg,
                   summary: data.summary || '',
                   chartSpec: data.chart_spec,
+                  diagramSpec: data.diagram_spec,
+                  toolCalls: data.tool_calls,
                 };
                 setCurrentMessage({ ...workingAgentMsg });
                 break;

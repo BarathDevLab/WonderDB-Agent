@@ -4,6 +4,8 @@ import { Navbar } from './components/Navbar';
 import { ThoughtTracker } from './components/ThoughtTracker';
 import { DataGrid } from './components/DataGrid';
 import { ChartViewer } from './components/ChartViewer';
+import { DiagramViewer } from './components/DiagramViewer';
+import { ToolCallBadge } from './components/ToolCallBadge';
 import { SchemaDrawer } from './components/SchemaDrawer';
 import { ChatInput } from './components/ChatInput';
 import { useAgentStream } from './hooks/useAgentStream';
@@ -267,10 +269,15 @@ export const App: React.FC = () => {
                       {/* 1. Sleek Claude Thinking bar */}
                       <ThoughtTracker message={msg} />
 
+                      {/* Tool Calls Badge */}
+                      {msg.toolCalls && msg.toolCalls.length > 0 && (
+                        <ToolCallBadge calls={msg.toolCalls} />
+                      )}
+
                       {/* 2. Summary */}
                       {msg.summary && (
                         <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl p-3.5">
-                          <p>{msg.summary}</p>
+                          <p className="whitespace-pre-wrap">{msg.summary}</p>
 
                           {/* Action Toolbar */}
                           <div className="mt-2.5 pt-2 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
@@ -320,12 +327,17 @@ export const App: React.FC = () => {
                         </div>
                       )}
 
-                      {/* 3. Table (Data Grid) */}
+                      {/* 3. Mermaid Diagram (ER diagram / Process flow / Decision tree) */}
+                      {msg.diagramSpec && msg.diagramSpec.mermaid && (
+                        <DiagramViewer spec={msg.diagramSpec} />
+                      )}
+
+                      {/* 4. Table (Data Grid) */}
                       {msg.rawResults && msg.rawResults.length > 0 && (
                         <DataGrid data={msg.rawResults} />
                       )}
 
-                      {/* 4. Chart (Chart.js Visualization) */}
+                      {/* 5. Chart (Chart.js Visualization) */}
                       {msg.chartSpec && msg.chartSpec.type !== 'table' && (
                         <ChartViewer spec={msg.chartSpec} />
                       )}
@@ -335,7 +347,7 @@ export const App: React.FC = () => {
               </div>
             ))}
 
-            {/* Active Streaming Message: Ordered exactly as Thinking -> Summary -> Table -> Chart */}
+            {/* Active Streaming Message */}
             {currentMessage && (
               <div className="space-y-3 animate-fadeIn">
                 <div className="flex items-start gap-2.5">
@@ -346,19 +358,29 @@ export const App: React.FC = () => {
                     {/* 1. Sleek Claude Thinking bar */}
                     <ThoughtTracker message={currentMessage} />
 
+                    {/* Tool Calls Badge */}
+                    {currentMessage.toolCalls && currentMessage.toolCalls.length > 0 && (
+                      <ToolCallBadge calls={currentMessage.toolCalls} />
+                    )}
+
                     {/* 2. Summary */}
                     {currentMessage.summary && (
                       <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl p-3.5">
-                        <p>{currentMessage.summary}</p>
+                        <p className="whitespace-pre-wrap">{currentMessage.summary}</p>
                       </div>
                     )}
 
-                    {/* 3. Table (Data Grid) */}
+                    {/* 3. Mermaid Diagram */}
+                    {currentMessage.diagramSpec && currentMessage.diagramSpec.mermaid && (
+                      <DiagramViewer spec={currentMessage.diagramSpec} />
+                    )}
+
+                    {/* 4. Table (Data Grid) */}
                     {currentMessage.rawResults && currentMessage.rawResults.length > 0 && (
                       <DataGrid data={currentMessage.rawResults} />
                     )}
 
-                    {/* 4. Chart (Chart.js Visualization) */}
+                    {/* 5. Chart (Chart.js Visualization) */}
                     {currentMessage.chartSpec && currentMessage.chartSpec.type !== 'table' && (
                       <ChartViewer spec={currentMessage.chartSpec} />
                     )}

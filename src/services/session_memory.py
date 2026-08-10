@@ -59,3 +59,8 @@ async def append_session_event(session_id: str, event: dict[str, Any]) -> None:
 
 async def clear_session_events(session_id: str) -> None:
     await session_memory_service.clear_session(session_id)
+
+
+async def get_session_history(session_id: str, limit: int = 20) -> list[dict]:
+    """Return the last `limit` session events for contextual follow-ups."""
+    return await session_memory_service.get_session_history(session_id, limit=limit)
