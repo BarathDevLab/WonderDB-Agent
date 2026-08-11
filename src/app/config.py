@@ -41,6 +41,9 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         if self.database_url:
+            # Normalize postgres:// scheme (provided by Render) to postgresql:// for asyncpg
+            if self.database_url.startswith("postgres://"):
+                self.database_url = "postgresql://" + self.database_url[len("postgres://"):]
             from urllib.parse import urlparse
             try:
                 parsed = urlparse(self.database_url)

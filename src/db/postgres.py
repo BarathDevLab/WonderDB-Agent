@@ -47,7 +47,11 @@ class PostgresPool:
             )
             self._loop = current_loop
         except Exception as exc:
-            logger.warning("Could not connect to PostgreSQL: %s. Operating in offline mode.", exc)
+            logger.warning(
+                "Could not connect to PostgreSQL at '%s': %s. Operating in offline mode.",
+                self._settings.postgres_host,
+                exc,
+            )
             self._pool = None
             self._loop = None
 
