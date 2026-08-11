@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { ChatMessage, ChatSession } from '../types';
 
 const STORAGE_KEY = 'ai_db_agent_sessions_v1';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
 
 function getInitialSessions(): ChatSession[] {
   try {
@@ -182,7 +183,7 @@ export function useAgentStream(initialTenantId: string) {
       abortControllerRef.current = controller;
 
       try {
-        const response = await fetch('/api/v1/agent/stream', {
+        const response = await fetch(`${API_BASE_URL}/api/v1/agent/stream`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

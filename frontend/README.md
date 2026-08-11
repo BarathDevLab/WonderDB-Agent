@@ -54,6 +54,8 @@ npm run dev
 By default, the application will be available at `http://localhost:5173/`. 
 *(Note: Ensure your FastAPI backend and MCP server are running locally so the frontend can successfully connect to the endpoints).*
 
+To point the frontend at a different backend URL, create a `.env` file in this folder and set `VITE_API_BASE_URL`, for example `http://localhost:8000`.
+
 ### Building for Production
 
 To compile the TypeScript code and bundle the application for production deployment:
