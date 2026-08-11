@@ -20,8 +20,8 @@ services:
       - key: GEMINI_API_KEY
         sync: false # Set your Google Gemini API Key
       - key: GEMINI_MODEL
-        value: gemini-1.5-flash
+        value: gemini-2.5-flash
       - key: GEMINI_EMBEDDING_MODEL
-        value: text-embedding-004
+        value: gemini-embedding-001
       - key: ENABLE_SEMANTIC_CACHE
         value: "true"

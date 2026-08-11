@@ -135,7 +135,7 @@ async def _classify_intent(
         async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(url, json=payload)
             if res.status_code != 200:
-                logger.warning("Gemini classify intent returned %s", res.status_code)
+                logger.warning("Gemini classify intent returned %s: %s", res.status_code, res.text)
                 return None
 
             data = res.json()

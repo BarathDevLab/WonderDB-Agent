@@ -42,10 +42,11 @@ async def start_mcp_client() -> None:
             Path(__file__).resolve().parent.parent / "mcp_server" / "server.py"
         )
 
+        import os
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[server_script],
-            env=None,  # inherits parent environment
+            env=dict(os.environ),
         )
 
         _mcp_exit_stack = AsyncExitStack()

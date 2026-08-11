@@ -75,8 +75,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_schema_catalog_tenant_table_column
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
-        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_schema_catalog_embedding_hnsw
-                 ON schema_catalog USING hnsw (embedding vector_cosine_ops)
-                 WITH (m = 16, ef_construction = 64)';
+        BEGIN
+            EXECUTE 'CREATE INDEX IF NOT EXISTS idx_schema_catalog_embedding_hnsw
+                     ON schema_catalog USING hnsw (embedding vector_cosine_ops)
+                     WITH (m = 16, ef_construction = 64)';
+        EXCEPTION WHEN OTHERS THEN
+            -- Ignore if column is unconstrained vector (no fixed dimensions)
+            NULL;
+        END;
     END IF;
 END $$;
