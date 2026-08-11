@@ -1,8 +1,10 @@
 """
 sql_subgraph.py
 ===============
-Isolated subgraph for executing SQL. Handles SQL generation, execution, and 
-reflexive error handling (up to 3 retries) independently of the main graph.
+Isolated subgraph for SQL generation, execution, and reflexive error correction.
+Handles up to MAX_RETRIES retry cycles independently of the main graph.
+
+State isolation: inputs/outputs are bridged via sql_engine_wrapper only.
 """
 from langgraph.graph import StateGraph, START, END
 
@@ -11,31 +13,53 @@ from agent.nodes.sql_gen_node import sql_gen_node
 from agent.nodes.execute_node import execute_node
 from agent.nodes.reflect_node import reflect_node
 
+MAX_RETRIES = 3
+
+
 def build_sql_subgraph():
     sg = StateGraph(SQLSubgraphState)
-    
+
     sg.add_node("sql_gen", sql_gen_node)
     sg.add_node("execute_db", execute_node)
     sg.add_node("reflect", reflect_node)
-    
+
     sg.add_edge(START, "sql_gen")
     sg.add_edge("sql_gen", "execute_db")
-    
+
     def check_db_error(state: SQLSubgraphState) -> str:
-        if state.get("db_error") and state.get("retry_count", 0) < 3:
+        """
+        Retry only when BOTH conditions hold:
+          1. db_error is non-empty (actual failure occurred)
+          2. dataset is empty (no partial results to use)
+          3. retry budget not exhausted
+
+        Bug fixed: previously only checked db_error, which could be stale
+        from a prior failed attempt even after a successful re-try, causing
+        spurious retries.
+        """
+        has_error = bool(state.get("db_error", "").strip())
+        has_data = bool(state.get("dataset"))
+        retry_count = state.get("retry_count", 0)
+
+        if has_error and not has_data and retry_count < MAX_RETRIES:
             return "reflect"
         return END
-        
+
     sg.add_conditional_edges("execute_db", check_db_error)
     sg.add_edge("reflect", "sql_gen")
-    
+
     return sg.compile()
+
 
 compiled_sql_subgraph = build_sql_subgraph()
 
+
 async def sql_engine_wrapper(state: GlobalState) -> dict:
-    """Invoked as a node in the main graph. Translates state and hides subgraph messiness."""
-    # 1. Translate parent state -> subgraph state
+    """
+    Main-graph node that invokes the isolated SQL subgraph.
+    Translates GlobalState fields into SQLSubgraphState, runs the loop,
+    then maps results back — exposing only the fields the main graph needs.
+    """
     sub_state: SQLSubgraphState = {
         "tenant_id": state.get("tenant_id", "default-tenant"),
         "prompt": state.get("prompt", ""),
@@ -44,15 +68,20 @@ async def sql_engine_wrapper(state: GlobalState) -> dict:
         "error_message": "",
         "tool_calls": [],
     }
-    
-    # 2. Run the isolated loop
+
     result = await compiled_sql_subgraph.ainvoke(sub_state)
-    
-    # 3. Map only the clean data and necessary tracking info back to the parent GlobalState
+
+    db_error = result.get("db_error", "").strip()
+    has_fatal = bool(db_error) and not result.get("dataset")
+
     return {
         "clean_dataset": result.get("dataset", []),
-        "sql_query": result.get("generated_sql", ""), # Useful for explain context and caching
+        "sql_query": result.get("generated_sql", ""),
         "tool_calls": result.get("tool_calls", []),
-        "summary": result.get("db_error", "") if result.get("db_error") else "", # Pass severe error to fallback
+        # Use the structured sentinel instead of embedding error text in summary
+        "has_fatal_error": has_fatal,
+        "error_detail": db_error if has_fatal else "",
+        # Keep summary empty here; synthesize_node is responsible for final text
+        "summary": "",
         "current_phase": "sql_engine_complete",
     }

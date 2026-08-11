@@ -29,7 +29,9 @@ PHASE 3 – VECTOR SEARCH (retrieve)
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from typing import Any
 
 import httpx
@@ -102,12 +104,30 @@ async def generate_embedding(text: str, api_key: str, model: str) -> list[float]
         "content": {"parts": [{"text": text}]},
     }
     client = _get_httpx_client()
-    resp = await client.post(url, json=payload)
-    if resp.status_code == 200:
-        return resp.json()["embedding"]["values"]
-    raise ValueError(
-        f"Gemini embedding API returned {resp.status_code}: {resp.text[:200]}"
-    )
+    
+    max_retries = 5
+    base_delay = 1.0
+
+    for attempt in range(max_retries):
+        resp = await client.post(url, json=payload)
+        if resp.status_code == 200:
+            return resp.json()["embedding"]["values"]
+        
+        if resp.status_code == 429:
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                logger.warning(
+                    "Gemini API rate limited (429). Retrying in %.2fs (attempt %d/%d)",
+                    delay, attempt + 1, max_retries
+                )
+                await asyncio.sleep(delay)
+                continue
+
+        raise ValueError(
+            f"Gemini embedding API returned {resp.status_code}: {resp.text[:200]}"
+        )
+    
+    raise ValueError(f"Failed to generate embedding after {max_retries} attempts.")
 
 
 def _vec_to_pgvector(vec: list[float]) -> str:
@@ -324,6 +344,9 @@ class SchemaRAGService:
                             is_pii, desc_text, vec_str,
                         )
                         count += 1
+                        
+                        # Rate limit the batch to avoid immediate 429s on free tier
+                        await asyncio.sleep(2.0)
 
             logger.info(
                 "Phase 2 – Upserted %d schema embeddings for tenant %s", count, tenant_id

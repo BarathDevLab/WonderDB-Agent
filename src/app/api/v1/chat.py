@@ -40,12 +40,13 @@ async def stream_agent_get(
 ) -> StreamingResponse:
     """Stream live LangGraph Text-to-SQL state transitions over HTTP/2 SSE."""
     sid = session_id or f"session-{tenant_id}"
+    # Bug fix: removed retry_count — it belongs to SQLSubgraphState only,
+    # not GlobalState. Injecting it here was silently polluting global state.
     initial_state: GlobalState = {
         "prompt": prompt,
         "tenant_id": tenant_id,
         "user_id": user_id,
         "session_id": sid,
-        "retry_count": 0,
     }
     return StreamingResponse(
         _generate_sse_stream(initial_state),
@@ -62,12 +63,12 @@ async def stream_agent_get(
 async def stream_agent_post(request: ChatStreamRequest) -> StreamingResponse:
     """POST variant for streaming with complex query payloads."""
     sid = request.session_id or f"session-{request.tenant_id}"
+    # Bug fix: removed retry_count — it belongs to SQLSubgraphState only.
     initial_state: GlobalState = {
         "prompt": request.prompt,
         "tenant_id": request.tenant_id,
         "user_id": request.user_id,
         "session_id": sid,
-        "retry_count": 0,
     }
     return StreamingResponse(
         _generate_sse_stream(initial_state),

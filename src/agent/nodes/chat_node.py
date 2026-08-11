@@ -1,14 +1,18 @@
 """
 chat_node
 =========
-Handles two non-data intents:
-  - "chat"       : greetings, help, small talk — no DB access needed
-  - "contextual" : follow-up on previous turn ("simpler", "continue",
-                   "explain above") — reads session memory for context
+Handles two non-data intents dispatched by the supervisor:
+
+  intent = "chat"       → Greetings, help requests, small talk.
+                          No database access. No session memory read.
+  intent = "contextual" → Follow-up on the previous turn's result.
+                          Reads session memory for context, then answers.
+
+The node makes a single Gemini call with a carefully constructed system
+instruction that matches the sub-intent detected from the user's words.
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -21,11 +25,31 @@ from services.session_memory import get_session_history, append_session_event
 logger = logging.getLogger(__name__)
 
 
-_GREETING_KEYWORDS = frozenset(["hi", "hello", "hey", "hiya", "howdy", "good morning", "good evening"])
-_HELP_KEYWORDS = frozenset(["help", "what can you do", "how does this work", "what do you do", "capabilities"])
-_SIMPLER_KEYWORDS = ["simpler", "simple", "plain english", "layman", "easy", "explain simpler"]
-_CONTINUE_KEYWORDS = ["continue", "tell me more", "more", "go on", "elaborate", "more details", "and?"]
-_EXPLAIN_ABOVE_KEYWORDS = ["explain above", "explain that", "explain this", "what does this mean", "what does that mean"]
+# ── Keyword sets ────────────────────────────────────────────────────────────
+
+_GREETING_KEYWORDS = frozenset([
+    "hi", "hello", "hey", "hiya", "howdy",
+    "good morning", "good evening", "good afternoon",
+    "greetings", "sup", "yo",
+])
+_HELP_KEYWORDS = frozenset([
+    "help", "what can you do", "how does this work",
+    "what do you do", "capabilities", "features",
+    "what are you", "tell me about yourself",
+])
+_SIMPLER_KEYWORDS = [
+    "simpler", "simple", "plain english", "layman", "easy",
+    "explain simpler", "in simple terms", "dumb it down",
+]
+_CONTINUE_KEYWORDS = [
+    "continue", "tell me more", "more", "go on",
+    "elaborate", "more details", "and?", "keep going",
+]
+_EXPLAIN_KEYWORDS = [
+    "explain above", "explain that", "explain this",
+    "what does this mean", "what does that mean",
+    "break it down", "break this down",
+]
 
 
 async def _call_gemini(system_instruction: str, user_content: str) -> str:
@@ -38,12 +62,15 @@ async def _call_gemini(system_instruction: str, user_content: str) -> str:
         model_name = settings.gemini_model.strip()
         if model_name.startswith("models/"):
             model_name = model_name[len("models/"):]
+
         payload = {
             "contents": [{"role": "user", "parts": [{"text": f"{system_instruction}\n\n{user_content}"}]}],
-            "generationConfig": {"temperature": 0.7},
+            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 512},
         }
-        url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-               f"{model_name}:generateContent?key={settings.gemini_api_key}")
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model_name}:generateContent?key={settings.gemini_api_key}"
+        )
         async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(url, json=payload)
             if res.status_code == 200:
@@ -56,12 +83,11 @@ async def _call_gemini(system_instruction: str, user_content: str) -> str:
 
 
 def _build_context_from_history(history: list[dict[str, Any]]) -> str:
-    """Build a context string from the last relevant session events."""
-    # Find the most recent query/summary event
+    """Extract the most recent meaningful query/summary event for context."""
     for event in reversed(history):
         phase = event.get("phase", "")
         if phase in ("plan", "summary"):
-            parts = []
+            parts: list[str] = []
             if event.get("prompt"):
                 parts.append(f"Previous question: {event['prompt']}")
             if event.get("sql_query"):
@@ -70,7 +96,8 @@ def _build_context_from_history(history: list[dict[str, Any]]) -> str:
                 parts.append(f"Previous answer: {event['summary']}")
             if event.get("rows_count") is not None:
                 parts.append(f"Rows returned: {event['rows_count']}")
-            return "\n".join(parts)
+            if parts:
+                return "\n".join(parts)
     return ""
 
 
@@ -79,14 +106,17 @@ async def chat_node(state: GlobalState) -> GlobalState:
     plan = state.get("supervisor_plan", {})
     intent = plan.get("intent", "chat")
     prompt = state.get("prompt", "").strip()
-    session_id = state.get("session_id", "default")
-    prompt_lower = prompt.lower()
+    tenant_id = state.get("tenant_id", "default-tenant")
 
+    # Bug fix: was defaulting to literal "default" which could cause
+    # session collision if multiple tenants sent chat messages simultaneously.
+    session_id = state.get("session_id") or f"session-{tenant_id}"
+
+    prompt_lower = prompt.lower()
     context = ""
     system_msg = ""
 
     if intent == "contextual":
-        # Load session history for context-aware response
         history = await get_session_history(session_id)
         context = _build_context_from_history(history)
 
@@ -94,48 +124,58 @@ async def chat_node(state: GlobalState) -> GlobalState:
             system_msg = (
                 "You are a friendly data analyst. The user wants you to re-explain "
                 "the previous database query result in very simple, non-technical, "
-                "plain English that anyone can understand. Avoid SQL and technical jargon."
+                "plain English that anyone can understand. Avoid SQL and technical jargon. "
+                "Use analogies and everyday language."
             )
         elif any(kw in prompt_lower for kw in _CONTINUE_KEYWORDS):
             system_msg = (
-                "You are a senior data analyst. The user wants you to continue the analysis "
-                "and provide additional insights, trends, or observations from the previous result."
+                "You are a senior data analyst. Continue the analysis from the previous result. "
+                "Provide additional insights, trends, patterns, or observations. "
+                "Be specific — reference actual numbers and values from the data."
             )
-        elif any(kw in prompt_lower for kw in _EXPLAIN_ABOVE_KEYWORDS):
+        elif any(kw in prompt_lower for kw in _EXPLAIN_KEYWORDS):
             system_msg = (
-                "You are a data analyst. Explain the previous database query result "
-                "in detail — what the data shows, what it means for the business, "
-                "and any notable patterns."
+                "You are a data analyst writing a business intelligence narrative. "
+                "Explain the previous database query result in detail: "
+                "what the data shows, what it means for the business, "
+                "any notable patterns or anomalies, and actionable implications."
             )
         else:
             system_msg = (
-                "You are a helpful AI database assistant. Answer the user's follow-up "
-                "question using the context from the previous database query."
+                "You are a helpful AI database assistant. "
+                "Answer the user's follow-up question using the context from the previous database query. "
+                "Be specific and reference the data where relevant."
             )
 
         user_content = f"{context}\n\nUser follow-up: {prompt}" if context else prompt
 
     else:  # intent == "chat"
-        if any(kw in prompt_lower for kw in _GREETING_KEYWORDS) or prompt_lower in _GREETING_KEYWORDS:
+        is_greeting = any(kw in prompt_lower for kw in _GREETING_KEYWORDS)
+        is_help = any(kw in prompt_lower for kw in _HELP_KEYWORDS)
+
+        if is_greeting:
             system_msg = (
                 "You are a friendly and enthusiastic AI database assistant named DataBot. "
                 "Greet the user warmly and briefly explain your capabilities in 2-3 sentences: "
                 "you can query databases using natural language, generate bar/line/pie/scatter charts, "
-                "draw ER diagrams and process flow diagrams, and explain data in plain language."
+                "draw ER diagrams and process flow diagrams, and explain data in plain language. "
+                "Keep the response concise and inviting."
             )
-        elif any(kw in prompt_lower for kw in _HELP_KEYWORDS):
+        elif is_help:
             system_msg = (
-                "You are a helpful AI database assistant. Explain your capabilities clearly:\n"
+                "You are a helpful AI database assistant. Explain your capabilities clearly and concisely:\n"
                 "1. Query databases with natural language (e.g. 'show top 10 customers by revenue')\n"
-                "2. Generate charts: bar, line, pie, scatter plots\n"
+                "2. Generate charts: bar, line, pie, scatter\n"
                 "3. Draw diagrams: ER diagrams, process flows, decision trees\n"
-                "4. Explain data and results in plain language\n"
-                "Give examples of questions the user can ask."
+                "4. Explain data results in plain language\n"
+                "Give 2-3 example questions the user can try."
             )
         else:
             system_msg = (
                 "You are a helpful AI database assistant. Answer the user's question. "
-                "If it's not database-related, gently guide them to ask database questions."
+                "If the question is not related to databases or data analysis, "
+                "politely explain that you specialise in database queries and analytics, "
+                "and suggest they rephrase as a data question."
             )
         user_content = prompt
 

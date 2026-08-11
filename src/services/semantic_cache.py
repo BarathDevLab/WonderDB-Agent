@@ -1,10 +1,21 @@
+"""
+semantic_cache.py
+=================
+Neural vector-similarity semantic query caching backed by Redis.
+
+Two-tier lookup strategy:
+  1. Exact SHA-256 key match (O(1)) — returns instantly for identical prompts.
+  2. SCAN-based vector cosine-similarity search over cached entries.
+
+Bug fix: replaced `client.keys("semantic_cache:*")` (O(N) blocking Redis scan,
+a known production anti-pattern) with async `scan_iter()` cursor-based iteration
+with a hard limit on entries checked to bound worst-case latency.
+"""
 import asyncio
 import hashlib
 import json
 import logging
 import math
-import re
-from collections import OrderedDict
 from typing import Any
 
 import httpx
@@ -13,6 +24,10 @@ from app.config import get_settings
 from db.redis import get_redis_client
 
 logger = logging.getLogger(__name__)
+
+# Maximum cache entries to scan during similarity search.
+# Prevents O(N) Redis scan from blocking too long on large caches.
+_MAX_SCAN_ENTRIES = 500
 
 _shared_httpx: httpx.AsyncClient | None = None
 _shared_httpx_loop: Any = None
@@ -50,18 +65,17 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-
-
-
 async def _get_neural_embedding(text: str) -> list[float]:
     """Generate semantic embedding via Gemini API."""
     settings = get_settings()
     if not settings.gemini_api_key:
-        raise ValueError("Gemini API key is required to generate embeddings in production.")
+        raise ValueError("Gemini API key is required for semantic cache embeddings.")
 
     clean_model = "gemini-embedding-001"
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:embedContent?key={settings.gemini_api_key}"
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{clean_model}:embedContent?key={settings.gemini_api_key}"
+    )
     payload = {
         "model": f"models/{clean_model}",
         "content": {"parts": [{"text": text}]},
@@ -70,17 +84,14 @@ async def _get_neural_embedding(text: str) -> list[float]:
     res = await client.post(url, json=payload)
     if res.status_code == 200:
         return res.json()["embedding"]["values"]
-    
+
     error_msg = f"Gemini embedding API returned {res.status_code}: {res.text[:200]}"
     logger.error(error_msg)
     raise ValueError(error_msg)
 
 
-
-
-
 class SemanticCacheService:
-    """Neural Vector-Similarity semantic query caching (Redis only)."""
+    """Neural vector-similarity semantic query cache (Redis-backed)."""
 
     def __init__(self, ttl_seconds: int = 3600, default_similarity_threshold: float = 0.75) -> None:
         self._ttl = ttl_seconds
@@ -94,50 +105,70 @@ class SemanticCacheService:
     async def get(
         self, prompt: str, tenant_id: str = "default", similarity_threshold: float | None = None
     ) -> dict[str, Any] | None:
-        threshold = similarity_threshold or self._similarity_threshold
+        threshold = similarity_threshold if similarity_threshold is not None else self._similarity_threshold
         exact_key = self._hash_key(prompt, tenant_id)
 
         try:
             client = await get_redis_client()
-            
-            # 1. Exact match from Redis
+
+            # ── Tier 1: exact key match (O(1)) ──────────────────────────
             data = await client.get(exact_key)
             if data:
                 item = json.loads(data)
                 return item.get("payload", item)
 
-            # 2. Neural Vector Cosine Similarity Search from Redis keys
+            # ── Tier 2: vector similarity scan ──────────────────────────
+            # Generate embedding only if there are cached entries to search
+            # (avoids an unnecessary API call on an empty cache)
             try:
                 prompt_vec = await _get_neural_embedding(prompt)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Embedding for cache lookup failed: %s", exc)
                 return None
-                
+
             best_similarity = 0.0
             best_payload: dict[str, Any] | None = None
+            entries_checked = 0
 
-            # Optimization: only scan a limited set of recent semantic keys in a real prod env
-            # For this MVP prod version we scan semantic_cache:* keys (this can be slow if large)
-            keys = await client.keys("semantic_cache:*")
-            if not keys:
-                return None
-                
-            values = await client.mget(keys)
-            for val in values:
-                if val:
+            # FIXED: Use async scan_iter() cursor pagination instead of blocking KEYS *
+            # scan_iter yields keys in small batches and is safe for large Redis instances.
+            async for key in client.scan_iter("semantic_cache:*", count=100):
+                if entries_checked >= _MAX_SCAN_ENTRIES:
+                    logger.debug(
+                        "Semantic cache scan capped at %d entries", _MAX_SCAN_ENTRIES
+                    )
+                    break
+
+                val = await client.get(key)
+                if not val:
+                    continue
+
+                try:
                     entry = json.loads(val)
-                    if entry.get("tenant_id") == tenant_id and "embedding" in entry:
-                        cached_vec = entry["embedding"]
-                        if len(cached_vec) == len(prompt_vec):
-                            sim = _cosine_similarity(prompt_vec, cached_vec)
-                            if sim > best_similarity:
-                                best_similarity = sim
-                                best_payload = entry.get("payload")
+                except json.JSONDecodeError:
+                    continue
+
+                if entry.get("tenant_id") != tenant_id or "embedding" not in entry:
+                    entries_checked += 1
+                    continue
+
+                cached_vec = entry["embedding"]
+                if len(cached_vec) == len(prompt_vec):
+                    sim = _cosine_similarity(prompt_vec, cached_vec)
+                    if sim > best_similarity:
+                        best_similarity = sim
+                        best_payload = entry.get("payload")
+
+                entries_checked += 1
 
             if best_similarity >= threshold and best_payload is not None:
+                logger.debug(
+                    "Semantic cache hit (similarity=%.3f, tenant=%s)", best_similarity, tenant_id
+                )
                 return best_payload
-                
+
         except Exception as exc:
-            logger.error("Redis exact lookup failed: %s", exc)
+            logger.error("Semantic cache lookup failed: %s", exc)
 
         return None
 
@@ -156,8 +187,9 @@ class SemanticCacheService:
             encoded = json.dumps(entry, default=str)
             client = await get_redis_client()
             await client.set(key, encoded, ex=self._ttl)
+            logger.debug("Semantic cache SET for tenant=%s", tenant_id)
         except Exception as exc:
-            logger.error("Redis cache set failed: %s", exc)
+            logger.error("Semantic cache set failed: %s", exc)
 
     async def delete(self, prompt: str, tenant_id: str = "default") -> None:
         try:
@@ -165,16 +197,18 @@ class SemanticCacheService:
             client = await get_redis_client()
             await client.delete(key)
         except Exception as exc:
-            logger.error("Redis cache delete failed: %s", exc)
+            logger.error("Semantic cache delete failed: %s", exc)
 
     async def flush_all(self) -> None:
         try:
             client = await get_redis_client()
-            keys = await client.keys("semantic_cache:*")
-            if keys:
-                await client.delete(*keys)
+            deleted = 0
+            async for key in client.scan_iter("semantic_cache:*", count=100):
+                await client.delete(key)
+                deleted += 1
+            logger.info("Semantic cache flushed: %d keys deleted", deleted)
         except Exception as exc:
-            logger.error("Redis cache flush failed: %s", exc)
+            logger.error("Semantic cache flush failed: %s", exc)
 
 
 semantic_cache_service = SemanticCacheService()

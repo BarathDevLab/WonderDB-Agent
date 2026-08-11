@@ -1,14 +1,15 @@
 import pytest
 from services.schema_rag import (
-    generate_embedding,
     SchemaRAGService,
-    _cosine_similarity,
 )
+from services.semantic_cache import _cosine_similarity
 
 @pytest.mark.asyncio
 async def test_embedding_generation_1536_dimensions():
+    """Verify the semantic cache embedding function returns correct dimensionality."""
+    from services.semantic_cache import _get_neural_embedding
     text = "Show all customers and orders with total spending"
-    emb = await generate_embedding(text)
+    emb = await _get_neural_embedding(text)
     assert len(emb) == 1536
     assert isinstance(emb[0], float)
 

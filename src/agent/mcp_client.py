@@ -71,8 +71,12 @@ async def stop_mcp_client() -> None:
         try:
             await _mcp_exit_stack.aclose()
             logger.info("MCP client disconnected")
-        except Exception as exc:
-            logger.warning("MCP client shutdown error: %s", exc)
+        except BaseException as exc:
+            # CancelledError and KeyboardInterrupt are expected during Ctrl+C /
+            # SIGTERM shutdown when the event loop is being torn down — not real errors.
+            import asyncio
+            if not isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)):
+                logger.warning("MCP client shutdown error: %s", exc)
         finally:
             _mcp_session = None
             _mcp_exit_stack = None
