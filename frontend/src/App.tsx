@@ -274,70 +274,79 @@ export const App: React.FC = () => {
                         <ToolCallBadge calls={msg.toolCalls} />
                       )}
 
-                      {/* 2. Summary */}
+                      {/* 3. Mermaid Diagrams (ER / Process / Decision) — shown BEFORE AI Insight */}
+                      {msg.diagramSpec && msg.diagramSpec.length > 0 && (
+                        msg.diagramSpec.map((spec, idx) => (
+                          <DiagramViewer key={idx} spec={spec} />
+                        ))
+                      )}
+
+                      {/* 4. AI Insight — shown AFTER diagrams so it explains everything above */}
                       {msg.summary && (
-                        <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl p-3.5">
-                          <p className="whitespace-pre-wrap">{msg.summary}</p>
-
-                          {/* Action Toolbar */}
-                          <div className="mt-2.5 pt-2 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => handleCopySummary(msg.id, msg.summary || '')}
-                                className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-[11px] font-mono"
-                                title="Copy answer"
-                              >
-                                {copiedMsgId === msg.id ? (
-                                  <>
-                                    <Check className="h-3 w-3 text-emerald-400" />
-                                    <span className="text-emerald-400">Copied</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="h-3 w-3" />
-                                    <span>Copy</span>
-                                  </>
-                                )}
-                              </button>
-
-                              {msg.sqlQuery && (
-                                <button
-                                  onClick={() => toggleInlineSql(msg.id)}
-                                  className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-[11px] font-mono text-zinc-400"
-                                >
-                                  <Code2 className="h-3 w-3" />
-                                  <span>{visibleSqlMsgIds[msg.id] ? 'Hide SQL' : 'View SQL'}</span>
-                                </button>
-                              )}
-                            </div>
-
-                            <span className="text-[10px] font-mono text-zinc-500">
-                              RLS Enforced
-                            </span>
+                        <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl overflow-hidden">
+                          {/* Label bar */}
+                          <div className="flex items-center gap-2 px-3.5 py-2 border-b border-zinc-800 bg-[#0f1013]">
+                            <TrendingUp className="h-3.5 w-3.5 text-indigo-400" />
+                            <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">AI Insight</span>
                           </div>
+                          <div className="px-3.5 py-3">
+                            <p className="whitespace-pre-wrap">{msg.summary}</p>
 
-                          {/* Inline SQL Viewer */}
-                          {visibleSqlMsgIds[msg.id] && msg.sqlQuery && (
-                            <div className="mt-2.5 rounded border border-zinc-800 bg-[#07080a] p-3 overflow-x-auto">
-                              <pre className="font-mono text-xs text-zinc-300 leading-relaxed select-all">
-                                <code>{msg.sqlQuery}</code>
-                              </pre>
+                            {/* Action Toolbar */}
+                            <div className="mt-2.5 pt-2 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => handleCopySummary(msg.id, msg.summary || '')}
+                                  className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-[11px] font-mono"
+                                  title="Copy answer"
+                                >
+                                  {copiedMsgId === msg.id ? (
+                                    <>
+                                      <Check className="h-3 w-3 text-emerald-400" />
+                                      <span className="text-emerald-400">Copied</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="h-3 w-3" />
+                                      <span>Copy</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {msg.sqlQuery && (
+                                  <button
+                                    onClick={() => toggleInlineSql(msg.id)}
+                                    className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-[11px] font-mono text-zinc-400"
+                                  >
+                                    <Code2 className="h-3 w-3" />
+                                    <span>{visibleSqlMsgIds[msg.id] ? 'Hide SQL' : 'View SQL'}</span>
+                                  </button>
+                                )}
+                              </div>
+
+                              <span className="text-[10px] font-mono text-zinc-500">
+                                RLS Enforced
+                              </span>
                             </div>
-                          )}
+
+                            {/* Inline SQL Viewer */}
+                            {visibleSqlMsgIds[msg.id] && msg.sqlQuery && (
+                              <div className="mt-2.5 rounded border border-zinc-800 bg-[#07080a] p-3 overflow-x-auto">
+                                <pre className="font-mono text-xs text-zinc-300 leading-relaxed select-all">
+                                  <code>{msg.sqlQuery}</code>
+                                </pre>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
 
-                      {/* 3. Mermaid Diagram (ER diagram / Process flow / Decision tree) */}
-                      {msg.diagramSpec && msg.diagramSpec.mermaid && (
-                        <DiagramViewer spec={msg.diagramSpec} />
-                      )}
-
-                      {/* 4. Table (Data Grid) */}
+                      {/* 5. Table (Data Grid) */}
                       {msg.rawResults && msg.rawResults.length > 0 && (
                         <DataGrid data={msg.rawResults} />
                       )}
 
-                      {/* 5. Chart (Chart.js Visualization) */}
+                      {/* 6. Chart (Chart.js Visualization) */}
                       {msg.chartSpec && msg.chartSpec.type !== 'table' && (
                         <ChartViewer spec={msg.chartSpec} />
                       )}
@@ -363,16 +372,24 @@ export const App: React.FC = () => {
                       <ToolCallBadge calls={currentMessage.toolCalls} />
                     )}
 
-                    {/* 2. Summary */}
-                    {currentMessage.summary && (
-                      <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl p-3.5">
-                        <p className="whitespace-pre-wrap">{currentMessage.summary}</p>
-                      </div>
+                    {/* 2. Mermaid Diagrams — shown first so AI Insight explains them */}
+                    {currentMessage.diagramSpec && currentMessage.diagramSpec.length > 0 && (
+                      currentMessage.diagramSpec.map((spec, idx) => (
+                        <DiagramViewer key={idx} spec={spec} />
+                      ))
                     )}
 
-                    {/* 3. Mermaid Diagram */}
-                    {currentMessage.diagramSpec && currentMessage.diagramSpec.mermaid && (
-                      <DiagramViewer spec={currentMessage.diagramSpec} />
+                    {/* 3. AI Insight — shown AFTER diagrams */}
+                    {currentMessage.summary && (
+                      <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl overflow-hidden">
+                        <div className="flex items-center gap-2 px-3.5 py-2 border-b border-zinc-800 bg-[#0f1013]">
+                          <TrendingUp className="h-3.5 w-3.5 text-indigo-400" />
+                          <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">AI Insight</span>
+                        </div>
+                        <div className="px-3.5 py-3">
+                          <p className="whitespace-pre-wrap">{currentMessage.summary}</p>
+                        </div>
+                      </div>
                     )}
 
                     {/* 4. Table (Data Grid) */}

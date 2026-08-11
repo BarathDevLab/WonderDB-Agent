@@ -19,7 +19,7 @@ export interface TableMetadata {
 }
 
 export interface ChartSpec {
-  type: 'line' | 'bar' | 'pie' | 'doughnut' | 'table';
+  type: 'line' | 'bar' | 'pie' | 'doughnut' | 'scatter' | 'table';
   data?: {
     labels: string[];
     datasets: {
@@ -59,7 +59,7 @@ export interface ChatMessage {
   rawResults?: Record<string, any>[];
   summary?: string;
   chartSpec?: ChartSpec;
-  diagramSpec?: DiagramSpec;
+  diagramSpec?: DiagramSpec[];
   toolCalls?: ToolCall[];
   errorMessage?: string;
   retryCount?: number;

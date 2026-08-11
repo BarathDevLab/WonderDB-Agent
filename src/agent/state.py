@@ -17,6 +17,7 @@ class AgentState(TypedDict, total=False):
     chart_type: str           # "auto" | "bar" | "line" | "pie" | "scatter"
     needs_er_diagram: bool    # True → summarize_node calls generate_flowchart(er)
     needs_process_flow: bool  # True → summarize_node calls generate_flowchart(process)
+    needs_decision_tree: bool # True → summarize_node calls generate_flowchart(decision)
     needs_explanation: bool   # True → summarize_node / chat_node calls explain_data
 
     # ── Semantic Cache & Planning ─────────────────────────────────────────
@@ -34,7 +35,7 @@ class AgentState(TypedDict, total=False):
     # ── Output ────────────────────────────────────────────────────────────
     summary: str
     chart_spec: dict[str, Any]
-    diagram_spec: dict[str, Any]   # {"mermaid": "...", "diagram_type": "er|process|decision"}
+    diagram_spec: list[dict[str, Any]]  # [{"mermaid": "...", "diagram_type": "er|process|decision"}, ...]
     tool_calls: list[dict]         # MCP tool call log [{"tool": str, "status": str, "duration_ms": float}]
 
     # ── Reflection & Resilience ───────────────────────────────────────────

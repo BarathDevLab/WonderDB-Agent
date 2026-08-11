@@ -544,8 +544,8 @@ def _build_decision_tree(raw_data: list[dict[str, Any]], title: str = "") -> str
 @mcp.tool()
 async def explain_data(prompt: str, raw_results: list[dict[str, Any]]) -> str:
     """
-    Translate SQL query results into a plain-language executive summary.
-    Calls Gemini API to generate a 2-sentence business-focused summary.
+    Translate SQL query results + diagram context into a rich, structured explanation.
+    Calls Gemini API to generate a business-focused narrative covering every artifact.
     Returns JSON: {summary: str, key_metrics: list[str]}
     """
     from app.config import get_settings
@@ -557,23 +557,31 @@ async def explain_data(prompt: str, raw_results: list[dict[str, Any]]) -> str:
 
     try:
         system_instruction = (
-            "You are a senior data analyst. Given a user question and dataset, "
-            "provide a concise 2-sentence executive summary highlighting key metrics and insights. "
-            "Also return up to 3 key metric strings in a 'key_metrics' list."
+            "You are a senior data analyst writing a business intelligence report. "
+            "The user's request and context is given below — it may include references to "
+            "ER diagrams, process flows, decision trees, charts, and raw data. "
+            "Write a clear, structured explanation that covers EVERY artifact mentioned:\n\n"
+            "FORMAT your response exactly like this (only include sections that apply):\n"
+            "**Data Summary**: 2-3 sentences on what the numbers show and key trends.\n"
+            "**ER Diagram**: (if requested) Briefly explain the table relationships and what they represent.\n"
+            "**Process Flow**: (if requested) Describe the business lifecycle shown — e.g. order stages.\n"
+            "**Decision Tree**: (if requested) Explain the split logic — what qualifies as high vs low.\n"
+            "**Key Takeaway**: One actionable business insight.\n\n"
+            "Rules: Be specific with numbers from the data. Never say 'the data shows' without citing actual values. "
             "Output ONLY valid JSON: {\"summary\": \"...\", \"key_metrics\": [\"...\", ...]}"
         )
-        user_content = f"Question: {prompt}\nDataset (first 10 rows): {json.dumps(raw_results[:10])}"
+        user_content = f"Context & Request:\n{prompt}\n\nData (first 10 rows): {json.dumps(raw_results[:10])}"
         model_name = settings.gemini_model.strip()
         if model_name.startswith("models/"):
             model_name = model_name[len("models/"):]
         payload = {
             "contents": [{"role": "user", "parts": [{"text": f"{system_instruction}\n\n{user_content}"}]}],
-            "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
+            "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"},
         }
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
                f"{model_name}:generateContent?key={settings.gemini_api_key}")
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             res = await client.post(url, json=payload)
             if res.status_code == 200:
                 data = res.json()

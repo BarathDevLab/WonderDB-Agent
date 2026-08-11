@@ -107,10 +107,9 @@ async def run_langgraph_sse(
                         {
                             "summary": state_update.get("summary", ""),
                             "chart_spec": state_update.get("chart_spec", {}),
-                            "diagram_spec": state_update.get("diagram_spec", {}),
+                            "diagram_spec": state_update.get("diagram_spec", []),
                             "tool_calls": state_update.get("tool_calls", []),
                         },
                     )
 
     yield format_sse_event("complete", {"ok": True})
-

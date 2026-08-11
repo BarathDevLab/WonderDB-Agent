@@ -7,12 +7,13 @@ import {
   LineElement,
   BarElement,
   ArcElement,
+  ScatterController,
   Title,
   Tooltip,
   Legend,
   Filler,
 } from 'chart.js';
-import { Bar, Line, Doughnut, Pie } from 'react-chartjs-2';
+import { Bar, Line, Doughnut, Pie, Scatter } from 'react-chartjs-2';
 import { BarChart3, TrendingUp, PieChart } from 'lucide-react';
 import { ChartSpec } from '../types';
 
@@ -23,6 +24,7 @@ ChartJS.register(
   LineElement,
   BarElement,
   ArcElement,
+  ScatterController,
   Title,
   Tooltip,
   Legend,
@@ -141,6 +143,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({ spec }) => {
         {chartType === 'bar' && <Bar data={enhancedData} options={chartOptions} />}
         {chartType === 'doughnut' && <Doughnut data={enhancedData} options={chartOptions} />}
         {chartType === 'pie' && <Pie data={enhancedData} options={chartOptions} />}
+        {chartType === 'scatter' && <Scatter data={enhancedData} options={chartOptions} />}
       </div>
     </div>
   );

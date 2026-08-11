@@ -64,11 +64,13 @@ Analyze the user's message and return a JSON object with these exact fields:
   "chart_type": "auto" | "bar" | "line" | "pie" | "scatter",
   "needs_er_diagram": true | false,
   "needs_process_flow": true | false,
+  "needs_decision_tree": true | false,
   "needs_explanation": true | false,
   "sql": "SELECT ..." | null
 }
 
-RULES:
+INTENT RULES:
+
 DATA QUERY (intent="query"):
 - User asks a measurable/data question about the database
 - Set needs_sql=true, generate valid PostgreSQL SELECT with LIMIT 100
@@ -79,11 +81,26 @@ DATA QUERY (intent="query"):
 - chart_type="bar" for most comparisons (default)
 - chart_type="auto" if chart needed but type unclear
 
-SCHEMA (intent="schema"):
-- User asks about table structure, relationships, ER diagram
+SQL GENERATION RULES (strictly follow for PostgreSQL):
+- Date intervals MUST use quoted lowercase strings: INTERVAL '3 months' NOT INTERVAL '3 MONTHS' or 3 MONTHS
+- Last N months: WHERE created_at >= NOW() - INTERVAL '3 months'
+- Always quote interval values: INTERVAL '1 year', INTERVAL '7 days', INTERVAL '6 months'
+- Use DATE_TRUNC('month', col) for monthly grouping
+- Use SUM(), COUNT(), AVG() for aggregations
+- Always include ORDER BY for time-series queries
+- Never use reserved words as column aliases without quoting
+
+SCHEMA ONLY (intent="schema"):
+- User asks ONLY about table structure, relationships, or ER diagram with NO data request
 - Set needs_sql=false, needs_er_diagram=true
-- Examples: "ER diagram", "schema", "table structure", "relationships", "explain [table]"
-- needs_process_flow=true if: "process", "flow", "pipeline", "steps", "workflow"
+- Examples: "show ER diagram", "what tables do we have", "explain the schema"
+
+HYBRID (intent="query") — MOST IMPORTANT RULE:
+- User asks for BOTH schema/diagrams AND data (revenue, orders, report, count, trend, etc.)
+- Example: "give the ER diagram AND process flow AND last 3 month revenue"
+- Set intent="query", needs_sql=true, needs_er_diagram=true
+- Generate SQL for the DATA portion of the request
+- ALL diagram flags (needs_er_diagram, needs_process_flow, needs_decision_tree) can be true simultaneously
 
 CHAT (intent="chat"):
 - Greeting: "hi", "hello", "hey", "good morning"
@@ -96,6 +113,14 @@ CONTEXTUAL (intent="contextual"):
   "continue", "tell me more", "elaborate", "more details", "and?",
   "explain that", "what does this mean"
 - Set needs_sql=false, needs_explanation=true
+
+DIAGRAM FLAGS — apply for ANY intent when these keywords appear:
+- needs_er_diagram=true if: "ER diagram", "entity relationship", "schema diagram",
+  "table structure", "relationships", "show tables"
+- needs_process_flow=true if: "process flow", "business process", "flow", "pipeline",
+  "steps", "workflow", "lifecycle", "order flow", "how orders work"
+- needs_decision_tree=true if: "decision tree", "high value", "who qualifies", "segment",
+  "flag customers", "what determines", "split by", "threshold", "classify"
 
 IMPORTANT:
 - Output ONLY valid JSON, no markdown, no explanation.
@@ -274,6 +299,7 @@ async def plan_node(state: AgentState) -> AgentState:
         "chart_type": classification.get("chart_type", "auto"),
         "needs_er_diagram": classification.get("needs_er_diagram", False),
         "needs_process_flow": classification.get("needs_process_flow", False),
+        "needs_decision_tree": classification.get("needs_decision_tree", False),
         "needs_explanation": classification.get("needs_explanation", True),
         "plan_strategy": f"LLM intent: {intent}",
         "sql_query": sql_query,
