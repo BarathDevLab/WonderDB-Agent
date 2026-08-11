@@ -73,7 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const checkHealth = async () => {
     try {
-      const res = await fetch('/api/v1/health');
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/health`);
       setIsBackendHealthy(res.ok);
     } catch {
       setIsBackendHealthy(false);
