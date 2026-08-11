@@ -59,9 +59,7 @@ async def _get_neural_embedding(text: str) -> list[float]:
     if not settings.gemini_api_key:
         raise ValueError("Gemini API key is required to generate embeddings in production.")
 
-    clean_model = model.strip()
-    if clean_model.startswith("models/"):
-        clean_model = clean_model[len("models/"):]
+    clean_model = "gemini-embedding-001"
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:embedContent?key={settings.gemini_api_key}"
     payload = {

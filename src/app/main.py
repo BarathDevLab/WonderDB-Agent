@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 from db.postgres import get_shared_pool
                 db_pool = await get_shared_pool()
                 upserted = await sync_schema_catalog(
-                    tenant_id="00000000-0000-0000-0000-000000000001",
+                    tenant_id="a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
                     pool=db_pool,
                 )
                 logger.info("Schema bootstrap: upserted %d embeddings into pgvector", upserted)

@@ -209,7 +209,7 @@ async def execute_query(sql: str, tenant_id: str) -> str:
     # 2. Enforce LIMIT
     try:
         from sqlglot import parse as sqlglot_parse
-        statements = sqlglot_parse(sql)
+        statements = sqlglot_parse(sql, read="postgres")
         if statements and hasattr(statements[0], 'args'):
             tree = statements[0]
             existing_limit = tree.args.get("limit")
@@ -222,7 +222,7 @@ async def execute_query(sql: str, tenant_id: str) -> str:
                         tree = tree.limit(100)
                 except (AttributeError, ValueError, TypeError):
                     pass
-            sql = tree.sql()
+            sql = tree.sql(dialect="postgres")
     except Exception:
         if "limit" not in sql.lower():
             sql = f"{sql.rstrip().rstrip(';')} LIMIT 100"
@@ -470,7 +470,7 @@ def _build_er_diagram(schema: list[dict[str, Any]]) -> str:
 
 
 def _build_process_flow(raw_data: list[dict[str, Any]], title: str = "") -> str:
-    """Build Mermaid flowchart TD from result rows as sequential process steps."""
+    """Build Mermaid flowchart TD from result rows as sequential process steps or real state transitions."""
     if not raw_data:
         return "flowchart TD\n  NO_DATA[No data available]"
 
@@ -479,6 +479,34 @@ def _build_process_flow(raw_data: list[dict[str, Any]], title: str = "") -> str:
         lines.append(f"  TITLE[\"<b>{title}</b>\"]")    
 
     keys = list(raw_data[0].keys())
+    
+    # Try to detect real state transitions (e.g. from previous_status to new_status)
+    from_key = next((k for k in keys if "from" in k.lower() or "prev" in k.lower()), None)
+    to_key = next((k for k in keys if k != from_key and ("to" in k.lower() or "new" in k.lower() or "status" in k.lower())), None)
+    
+    if from_key and to_key and from_key != to_key:
+        transitions = {}
+        for r in raw_data:
+            f = str(r.get(from_key) or "Start")
+            t = str(r.get(to_key) or "End")
+            transitions[(f, t)] = transitions.get((f, t), 0) + 1
+            
+        node_ids = {}
+        idx = 0
+        def get_id(n):
+            nonlocal idx
+            if n not in node_ids:
+                node_ids[n] = f"N{idx}"
+                idx += 1
+                lines.append(f"  {node_ids[n]}[\"{n}\"]")
+            return node_ids[n]
+            
+        for (f, t), count in transitions.items():
+            lines.append(f"  {get_id(f)} -->|Count: {count}| {get_id(t)}")
+            
+        return "\n".join(lines)
+
+    # Fallback to linear flow
     label_key = next((k for k in keys if isinstance(raw_data[0][k], str)), keys[0])
     value_key = next((k for k in keys if isinstance(raw_data[0][k], (int, float))), None)
 
@@ -500,12 +528,48 @@ def _build_process_flow(raw_data: list[dict[str, Any]], title: str = "") -> str:
 
 
 def _build_decision_tree(raw_data: list[dict[str, Any]], title: str = "") -> str:
-    """Build Mermaid decision tree with conditional branches (bonus)."""
+    """Build Mermaid decision tree with conditional branches."""
     if not raw_data:
         return "flowchart TD\n  NO_DATA[No data available]"
 
     lines = ["flowchart TD"]
     keys = list(raw_data[0].keys())
+    
+    # Try to find a decision outcome column
+    decision_key = next((k for k in keys if "decision" in k.lower() or "status" in k.lower() or "outcome" in k.lower()), None)
+    numeric_keys = [k for k in keys if isinstance(raw_data[0][k], (int, float))]
+    
+    if decision_key and numeric_keys:
+        feature_key = numeric_keys[0]
+        values = sorted([float(r.get(feature_key, 0)) for r in raw_data])
+        median = values[len(values) // 2] if values else 0
+        
+        lines.append(f"  ROOT{{\"Is {feature_key} > {median:.1f}?\"}}")
+        
+        above = [r for r in raw_data if float(r.get(feature_key, 0)) > median]
+        below = [r for r in raw_data if float(r.get(feature_key, 0)) <= median]
+        
+        # Aggregate decisions
+        def agg_decision(subset):
+            if not subset: return "Unknown"
+            counts = {}
+            for r in subset:
+                d = str(r.get(decision_key, "Unknown"))
+                counts[d] = counts.get(d, 0) + 1
+            return max(counts.items(), key=lambda x: x[1])[0]
+            
+        above_dec = agg_decision(above)
+        below_dec = agg_decision(below)
+        
+        lines.append(f"  A[\"{decision_key}: {above_dec}\\n({len(above)} cases)\"]")
+        lines.append("  ROOT -->|Yes| A")
+        
+        lines.append(f"  B[\"{decision_key}: {below_dec}\\n({len(below)} cases)\"]")
+        lines.append("  ROOT -->|No| B")
+        
+        return "\n".join(lines)
+
+    # Fallback to simple split
     label_key = next((k for k in keys if isinstance(raw_data[0][k], str)), keys[0])
     value_key = next((k for k in keys if isinstance(raw_data[0][k], (int, float))), None)
 

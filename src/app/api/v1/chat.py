@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from agent.graph import get_graph
 from agent.sse import run_langgraph_sse
-from agent.state import AgentState
+from agent.state import GlobalState
 from core.sse_formatter import format_sse_event
 
 
@@ -21,7 +21,7 @@ class ChatStreamRequest(BaseModel):
     session_id: str | None = Field(default=None, max_length=128, description="Optional session conversation ID")
 
 
-async def _generate_sse_stream(initial_state: AgentState) -> AsyncIterator[str]:
+async def _generate_sse_stream(initial_state: GlobalState) -> AsyncIterator[str]:
     try:
         graph = get_graph()
         async for event in run_langgraph_sse(graph, initial_state):
@@ -40,7 +40,7 @@ async def stream_agent_get(
 ) -> StreamingResponse:
     """Stream live LangGraph Text-to-SQL state transitions over HTTP/2 SSE."""
     sid = session_id or f"session-{tenant_id}"
-    initial_state: AgentState = {
+    initial_state: GlobalState = {
         "prompt": prompt,
         "tenant_id": tenant_id,
         "user_id": user_id,
@@ -62,7 +62,7 @@ async def stream_agent_get(
 async def stream_agent_post(request: ChatStreamRequest) -> StreamingResponse:
     """POST variant for streaming with complex query payloads."""
     sid = request.session_id or f"session-{request.tenant_id}"
-    initial_state: AgentState = {
+    initial_state: GlobalState = {
         "prompt": request.prompt,
         "tenant_id": request.tenant_id,
         "user_id": request.user_id,

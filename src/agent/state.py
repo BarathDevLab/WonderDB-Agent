@@ -1,44 +1,42 @@
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 
 
-class AgentState(TypedDict, total=False):
-    """Execution state passed between LangGraph nodes during AI Database Agent workflows."""
-
-    # ── Ingress ───────────────────────────────────────────────────────────
+class GlobalState(TypedDict, total=False):
+    """Global execution state for the orchestration layer."""
     prompt: str
     tenant_id: str
-    user_id: str
     session_id: str
-
-    # ── Intent (set by plan_node, drives all downstream routing) ─────────
-    intent: str               # "query" | "schema" | "chat" | "contextual"
-    needs_sql: bool           # True → execute_node runs SQL via MCP
-    needs_chart: bool         # True → summarize_node calls generate_chart tool
-    chart_type: str           # "auto" | "bar" | "line" | "pie" | "scatter"
-    needs_er_diagram: bool    # True → summarize_node calls generate_flowchart(er)
-    needs_process_flow: bool  # True → summarize_node calls generate_flowchart(process)
-    needs_decision_tree: bool # True → summarize_node calls generate_flowchart(decision)
-    needs_explanation: bool   # True → summarize_node / chat_node calls explain_data
-
-    # ── Semantic Cache & Planning ─────────────────────────────────────────
-    cached_hit: bool
-    enable_cache: bool
-    plan_strategy: str
+    user_id: str
+    
+    # Set by supervisor_node
+    supervisor_plan: dict[str, Any]
     retrieved_schemas: list[dict[str, Any]]
-    sql_query: str
-
-    # ── Execution ─────────────────────────────────────────────────────────
-    raw_results: list[dict[str, Any]]
-    explain_cost: float
-    ast_valid: bool
-
-    # ── Output ────────────────────────────────────────────────────────────
+    enable_cache: bool
+    cached_hit: bool
+    
+    # Data from SQL Subgraph
+    clean_dataset: list[dict[str, Any]]
+    sql_query: str  # Kept for caching/history
+    
+    # Parallel visualizations map-reduce (chart, er, etc.)
+    visualizations: Annotated[list[dict[str, Any]], operator.add]
+    
+    # Output and tracking
     summary: str
-    chart_spec: dict[str, Any]
-    diagram_spec: list[dict[str, Any]]  # [{"mermaid": "...", "diagram_type": "er|process|decision"}, ...]
-    tool_calls: list[dict]         # MCP tool call log [{"tool": str, "status": str, "duration_ms": float}]
-
-    # ── Reflection & Resilience ───────────────────────────────────────────
-    error_message: str
-    retry_count: int
     current_phase: str
+    tool_calls: Annotated[list[dict[str, Any]], operator.add]
+
+
+class SQLSubgraphState(TypedDict, total=False):
+    """Private execution state for the SQL execution subgraph."""
+    tenant_id: str
+    prompt: str
+    error_message: str # To pass previous errors to SQL Gen
+    prisma_context: str
+    generated_sql: str
+    dataset: list[dict[str, Any]]
+    db_error: str
+    retry_count: int
+    explain_cost: float
+    tool_calls: Annotated[list[dict[str, Any]], operator.add]

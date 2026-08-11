@@ -1,13 +1,13 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
-from agent.state import AgentState
+from agent.state import GlobalState
 from core.sse_formatter import format_sse_event
 
 
 async def run_langgraph_sse(
     graph: Any,
-    initial_state: AgentState,
+    initial_state: GlobalState,
     *,
     stream_mode: str = "updates",
 ) -> AsyncIterator[str]:
@@ -23,16 +23,17 @@ async def run_langgraph_sse(
                 if not isinstance(state_update, dict):
                     continue
 
-                if node_name == "plan":
+                if node_name == "supervisor":
+                    plan = state_update.get("supervisor_plan", {})
                     yield format_sse_event(
                         "plan_ready",
                         {
-                            "strategy": state_update.get("plan_strategy", ""),
-                            "sql": state_update.get("sql_query", ""),
+                            "strategy": f"Intent: {plan.get('intent', 'query')}",
+                            "sql": state_update.get("sql_query", ""), # might be from cache
                         },
                     )
                     if state_update.get("cached_hit"):
-                        results = state_update.get("raw_results", [])
+                        results = state_update.get("clean_dataset", [])
                         yield format_sse_event(
                             "execution_complete",
                             {
@@ -45,39 +46,40 @@ async def run_langgraph_sse(
                             "status",
                             {"phase": "summarizing", "message": "Synthesizing answer from cached execution..."},
                         )
-                    elif state_update.get("needs_sql"):
+                    elif plan.get("intent") == "query":
                         yield format_sse_event(
                             "status",
-                            {"phase": "executing", "message": "Validating AST & executing query..."},
+                            {"phase": "executing", "message": "Generating SQL and executing query..."},
                         )
-                    elif state_update.get("intent") == "schema":
+                    elif plan.get("intent") == "schema":
                         yield format_sse_event(
                             "status",
                             {"phase": "summarizing", "message": "Generating schema diagram..."},
                         )
-                    elif state_update.get("intent") in ("chat", "contextual"):
+                    elif plan.get("intent") in ("chat", "contextual"):
                         yield format_sse_event(
                             "status",
                             {"phase": "summarizing", "message": "Formulating response..."},
                         )
 
-                elif node_name == "execute":
-                    if state_update.get("error_message"):
+                elif node_name == "sql_engine":
+                    summary = state_update.get("summary", "")
+                    if summary and (summary.startswith("MCP execution error") or summary.startswith("SQL generation failed")):
                         yield format_sse_event(
                             "status",
                             {
-                                "phase": "reflection",
-                                "message": f"Execution error encountered: {state_update.get('error_message')}",
+                                "phase": "error",
+                                "message": f"Execution error encountered: {summary}",
                             },
                         )
                     else:
-                        results = state_update.get("raw_results", [])
+                        results = state_update.get("clean_dataset", [])
                         yield format_sse_event(
                             "execution_complete",
                             {
                                 "rows": len(results),
                                 "data": results,
-                                "cost": state_update.get("explain_cost", 0.0),
+                                "cost": 0.0, # explain cost is hidden in subgraph for now
                             },
                         )
                         yield format_sse_event(
@@ -85,29 +87,17 @@ async def run_langgraph_sse(
                             {"phase": "summarizing", "message": "Synthesizing answer and visual specs..."},
                         )
 
-                elif node_name == "reflect":
-                    yield format_sse_event(
-                        "reflection_retry",
-                        {
-                            "error": state_update.get("error_message", ""),
-                            "retry": state_update.get("retry_count", 1),
-                        },
-                    )
-                    yield format_sse_event(
-                        "status",
-                        {
-                            "phase": "planning",
-                            "message": f"Retrying query planning (Attempt #{state_update.get('retry_count', 1)})...",
-                        },
-                    )
-
-                elif node_name in ("chat", "summarize"):
+                elif node_name in ("chat", "synthesize"):
+                    visualizations = state_update.get("visualizations", [])
+                    chart_spec = next((v for v in visualizations if "type" in v), {})
+                    diagram_specs = [v for v in visualizations if "diagram_type" in v]
+                    
                     yield format_sse_event(
                         "final_response",
                         {
                             "summary": state_update.get("summary", ""),
-                            "chart_spec": state_update.get("chart_spec", {}),
-                            "diagram_spec": state_update.get("diagram_spec", []),
+                            "chart_spec": chart_spec,
+                            "diagram_spec": diagram_specs,
                             "tool_calls": state_update.get("tool_calls", []),
                         },
                     )

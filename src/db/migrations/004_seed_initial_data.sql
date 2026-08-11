@@ -42,3 +42,25 @@ VALUES
     ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'orders', 'total_amount', 'NUMERIC(12,2)', false, false, false, 'Total monetary amount for order'),
     ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'orders', 'status', 'VARCHAR(50)', false, false, false, 'Order state: completed, pending, cancelled')
 ON CONFLICT DO NOTHING;
+
+-- Insert Sample Order Events
+INSERT INTO order_events (id, tenant_id, order_id, previous_status, new_status, created_at)
+VALUES
+    ('90010000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'f0010000-0000-0000-0000-000000000001', 'pending', 'processing', NOW() - INTERVAL '3 months' - INTERVAL '2 days'),
+    ('90010000-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'f0010000-0000-0000-0000-000000000001', 'processing', 'shipped', NOW() - INTERVAL '3 months' - INTERVAL '1 days'),
+    ('90010000-0000-0000-0000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'f0010000-0000-0000-0000-000000000001', 'shipped', 'delivered', NOW() - INTERVAL '3 months'),
+    
+    ('90020000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'f0020000-0000-0000-0000-000000000002', 'pending', 'processing', NOW() - INTERVAL '2 months' - INTERVAL '3 days'),
+    ('90020000-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'f0020000-0000-0000-0000-000000000002', 'processing', 'cancelled', NOW() - INTERVAL '2 months'),
+    
+    ('90030000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'f0030000-0000-0000-0000-000000000003', 'pending', 'processing', NOW() - INTERVAL '1 month')
+ON CONFLICT DO NOTHING;
+
+-- Insert Sample Loan Applications
+INSERT INTO loan_applications (id, tenant_id, customer_id, credit_score, income, debt, decision_status, created_at)
+VALUES
+    ('80010000-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0010000-0000-0000-0000-000000000001', 750, 85000.00, 15000.00, 'Approved', NOW()),
+    ('80020000-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0020000-0000-0000-0000-000000000002', 620, 45000.00, 25000.00, 'Rejected', NOW()),
+    ('80030000-0000-0000-0000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0030000-0000-0000-0000-000000000003', 680, 55000.00, 10000.00, 'Manual Review', NOW()),
+    ('80040000-0000-0000-0000-000000000004', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'c0010000-0000-0000-0000-000000000001', 810, 120000.00, 5000.00, 'Approved', NOW())
+ON CONFLICT DO NOTHING;

@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from agent.state import AgentState
+from agent.state import GlobalState
 from app.config import get_settings
 from services.session_memory import get_session_history, append_session_event
 
@@ -74,9 +74,10 @@ def _build_context_from_history(history: list[dict[str, Any]]) -> str:
     return ""
 
 
-async def chat_node(state: AgentState) -> AgentState:
+async def chat_node(state: GlobalState) -> GlobalState:
     """Handle chat and contextual follow-up intents."""
-    intent = state.get("intent", "chat")
+    plan = state.get("supervisor_plan", {})
+    intent = plan.get("intent", "chat")
     prompt = state.get("prompt", "").strip()
     session_id = state.get("session_id", "default")
     prompt_lower = prompt.lower()
@@ -150,8 +151,5 @@ async def chat_node(state: AgentState) -> AgentState:
     return {
         **state,
         "summary": reply,
-        "chart_spec": {},
-        "diagram_spec": {},
-        "tool_calls": [],
         "current_phase": "chat_complete",
     }
