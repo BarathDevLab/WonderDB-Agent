@@ -624,15 +624,13 @@ async def explain_data(prompt: str, raw_results: list[dict[str, Any]]) -> str:
             "You are a senior data analyst writing a business intelligence report. "
             "The user's request and context is given below — it may include references to "
             "ER diagrams, process flows, decision trees, charts, and raw data. "
-            "Write a clear, structured explanation that covers EVERY artifact mentioned:\n\n"
-            "FORMAT your response exactly like this (only include sections that apply):\n"
-            "**Data Summary**: Provide a comprehensive, detailed explanation (at least 2-3 paragraphs) analyzing what the numbers show, highlighting key trends, anomalies, and broader business implications.\n"
-            "**ER Diagram**: (if requested) Briefly explain the table relationships and what they represent.\n"
-            "**Process Flow**: (if requested) Describe the business lifecycle shown — e.g. order stages.\n"
-            "**Decision Tree**: (if requested) Explain the split logic — what qualifies as high vs low.\n"
-            "**Key Takeaway**: Provide multiple actionable business insights derived from the detailed summary.\n\n"
-            "Rules: Be specific with numbers from the data. Never say 'the data shows' without citing actual values. Do not be overly brief; the user expects a longer, thorough explanation. "
-            "Output ONLY valid JSON: {\"summary\": \"...\", \"key_metrics\": [\"...\", ...]}"
+            "Write a clear, structured explanation that covers EVERY artifact mentioned.\n\n"
+            "Output ONLY valid JSON in the following format. The 'summary' field must be a single string containing markdown-formatted text with these exact sections (only include sections that apply):\n"
+            "{\n"
+            '  "summary": "**Data Summary**: Provide a comprehensive, detailed explanation (at least 2-3 paragraphs) analyzing what the numbers show, highlighting key trends, anomalies, and broader business implications.\\n\\n**ER Diagram**: (if requested) Briefly explain the table relationships and what they represent.\\n\\n**Process Flow**: (if requested) Describe the business lifecycle shown.\\n\\n**Decision Tree**: (if requested) Explain the split logic.\\n\\n**Key Takeaway**: Provide multiple actionable business insights.",\n'
+            '  "key_metrics": ["metric 1", "metric 2"]\n'
+            "}\n\n"
+            "Rules: Be specific with numbers from the data. Never say 'the data shows' without citing actual values. Do not be overly brief; the user expects a longer, thorough explanation. Do NOT wrap the JSON in markdown blocks (e.g. ```json)."
         )
         user_content = f"Context & Request:\n{prompt}\n\nData (first 10 rows): {json.dumps(raw_results[:10])}"
         model_name = settings.gemini_model.strip()
@@ -650,6 +648,13 @@ async def explain_data(prompt: str, raw_results: list[dict[str, Any]]) -> str:
             if res.status_code == 200:
                 data = res.json()
                 text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if text.startswith("```json"):
+                    text = text[7:]
+                if text.startswith("```"):
+                    text = text[3:]
+                if text.endswith("```"):
+                    text = text[:-3]
+                text = text.strip()
                 parsed = json.loads(text)
                 return json.dumps({
                     "summary": parsed.get("summary", ""),
