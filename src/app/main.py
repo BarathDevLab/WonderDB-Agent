@@ -91,19 +91,12 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 # CORS
-_allowed_origins = [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "https://ai-agent-database-snowy.vercel.app/",
-]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -128,7 +121,7 @@ _RATE_LIMIT_WINDOW = 60.0
 @app.middleware("http")
 async def rate_limiter(request: Request, call_next):
     import time
-    if request.url.path in ("/health", "/docs", "/openapi.json"):
+    if request.url.path in ("/health", "/docs", "/openapi.json") or request.method == "OPTIONS":
         return await call_next(request)
     client_ip = request.client.host if request.client else "unknown"
     now = time.time()
