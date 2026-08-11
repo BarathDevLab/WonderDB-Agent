@@ -281,7 +281,17 @@ export const App: React.FC = () => {
                         ))
                       )}
 
-                      {/* 4. AI Insight — shown AFTER diagrams so it explains everything above */}
+                      {/* 4. Table (Data Grid) */}
+                      {msg.rawResults && msg.rawResults.length > 0 && (
+                        <DataGrid data={msg.rawResults} />
+                      )}
+
+                      {/* 5. Chart (Chart.js Visualization) */}
+                      {msg.chartSpec && msg.chartSpec.type !== 'table' && (
+                        <ChartViewer spec={msg.chartSpec} />
+                      )}
+
+                      {/* 6. AI Insight — shown AFTER diagrams, table, and chart so it explains everything above */}
                       {msg.summary && (
                         <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl overflow-hidden">
                           {/* Label bar */}
@@ -340,16 +350,6 @@ export const App: React.FC = () => {
                           </div>
                         </div>
                       )}
-
-                      {/* 5. Table (Data Grid) */}
-                      {msg.rawResults && msg.rawResults.length > 0 && (
-                        <DataGrid data={msg.rawResults} />
-                      )}
-
-                      {/* 6. Chart (Chart.js Visualization) */}
-                      {msg.chartSpec && msg.chartSpec.type !== 'table' && (
-                        <ChartViewer spec={msg.chartSpec} />
-                      )}
                     </div>
                   </div>
                 )}
@@ -379,7 +379,17 @@ export const App: React.FC = () => {
                       ))
                     )}
 
-                    {/* 3. AI Insight — shown AFTER diagrams */}
+                    {/* 3. Table (Data Grid) */}
+                    {currentMessage.rawResults && currentMessage.rawResults.length > 0 && (
+                      <DataGrid data={currentMessage.rawResults} />
+                    )}
+
+                    {/* 4. Chart (Chart.js Visualization) */}
+                    {currentMessage.chartSpec && currentMessage.chartSpec.type !== 'table' && (
+                      <ChartViewer spec={currentMessage.chartSpec} />
+                    )}
+
+                    {/* 5. AI Insight — shown AFTER diagrams, table, and chart */}
                     {currentMessage.summary && (
                       <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl overflow-hidden">
                         <div className="flex items-center gap-2 px-3.5 py-2 border-b border-zinc-800 bg-[#0f1013]">
@@ -390,16 +400,6 @@ export const App: React.FC = () => {
                           <p className="whitespace-pre-wrap">{currentMessage.summary}</p>
                         </div>
                       </div>
-                    )}
-
-                    {/* 4. Table (Data Grid) */}
-                    {currentMessage.rawResults && currentMessage.rawResults.length > 0 && (
-                      <DataGrid data={currentMessage.rawResults} />
-                    )}
-
-                    {/* 5. Chart (Chart.js Visualization) */}
-                    {currentMessage.chartSpec && currentMessage.chartSpec.type !== 'table' && (
-                      <ChartViewer spec={currentMessage.chartSpec} />
                     )}
                   </div>
                 </div>

@@ -157,8 +157,7 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
     })
 
     return {
-        **state,
         "summary": summary,
-        "tool_calls": [{"tool": tc["tool"], "status": tc["status"], "duration_ms": tc["duration_ms"]} for tc in tool_calls], # ensure it's a list for operator.add if needed, or rely on state reduction
-        "current_phase": "synthesize_complete",
+        "tool_calls": [{"tool": tc["tool"], "status": tc["status"], "duration_ms": tc["duration_ms"]} for tc in tool_calls],
+        "current_phase": "complete",
     }

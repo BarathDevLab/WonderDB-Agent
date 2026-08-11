@@ -149,7 +149,6 @@ async def chat_node(state: GlobalState) -> GlobalState:
     })
 
     return {
-        **state,
         "summary": reply,
         "current_phase": "chat_complete",
     }

@@ -13,7 +13,6 @@ async def reflect_node(state: SQLSubgraphState) -> SQLSubgraphState:
     )
 
     return {
-        **state,
         "retry_count": retry_count,
         "error_message": reflection_notes,  # Read by sql_gen_node
     }

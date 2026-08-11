@@ -119,9 +119,9 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     _QUICK_CONTEXTUAL = ["simpler", "continue", "tell me more", "elaborate",
                          "explain above", "explain that", "more details"]
     if prompt_lower in _QUICK_CHAT:
-        return {**state, "supervisor_plan": {"intent": "chat", "visualizations": [], "needs_explanation": False}, "current_phase": "planning_complete"}
+        return {"supervisor_plan": {"intent": "chat", "visualizations": [], "needs_explanation": False}, "current_phase": "planning_complete"}
     if any(kw in prompt_lower for kw in _QUICK_CONTEXTUAL):
-        return {**state, "supervisor_plan": {"intent": "contextual", "visualizations": [], "needs_explanation": True}, "current_phase": "planning_complete"}
+        return {"supervisor_plan": {"intent": "contextual", "visualizations": [], "needs_explanation": True}, "current_phase": "planning_complete"}
 
     # ── Semantic Cache Gate ──────────────────────────────────────────────
     if cache_enabled:
@@ -137,7 +137,6 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
             for d in cached.get("diagram_spec", []): viz.append(d)
             
             return {
-                **state,
                 "cached_hit": True,
                 "sql_query": cached.get("sql_query", ""),
                 "clean_dataset": cached.get("raw_results", []),
@@ -154,7 +153,6 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     # ── LLM Intent Classification ───────────────────────
     if not settings.gemini_api_key or not settings.gemini_model:
         return {
-            **state,
             "cached_hit": False,
             "retrieved_schemas": retrieved_schemas,
             "supervisor_plan": {"intent": "error"},
@@ -169,7 +167,6 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
 
     if not plan:
         return {
-            **state,
             "cached_hit": False,
             "retrieved_schemas": retrieved_schemas,
             "supervisor_plan": {"intent": "error"},
@@ -184,7 +181,6 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     })
 
     return {
-        **state,
         "cached_hit": False,
         "retrieved_schemas": retrieved_schemas,
         "supervisor_plan": plan,

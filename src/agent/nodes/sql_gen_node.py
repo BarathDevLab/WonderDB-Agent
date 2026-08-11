@@ -121,7 +121,6 @@ async def sql_gen_node(state: SQLSubgraphState) -> SQLSubgraphState:
 
     if not settings.gemini_api_key or not settings.gemini_model:
         return {
-            **state,
             "db_error": "Gemini API key/model not configured.",
         }
 
@@ -135,12 +134,10 @@ async def sql_gen_node(state: SQLSubgraphState) -> SQLSubgraphState:
 
     if not sql_query:
         return {
-            **state,
             "db_error": "SQL generation failed.",
         }
 
     return {
-        **state,
         "generated_sql": sql_query,
         "db_error": "", # Clear previous errors
     }

@@ -55,7 +55,6 @@ async def execute_node(state: SQLSubgraphState) -> SQLSubgraphState:
 
     if not sql:
         return {
-            **state,
             "dataset": [],
             "db_error": "No SQL query to execute.",
         }
@@ -78,7 +77,6 @@ async def execute_node(state: SQLSubgraphState) -> SQLSubgraphState:
         if "error" in payload:
             logger.warning("execute_query tool error: %s", payload["error"])
             return {
-                **state,
                 "dataset": [],
                 "explain_cost": payload.get("explain_cost", 0.0),
                 "db_error": payload["error"],
@@ -87,7 +85,6 @@ async def execute_node(state: SQLSubgraphState) -> SQLSubgraphState:
             }
 
         return {
-            **state,
             "dataset": payload.get("raw_results", []),
             "explain_cost": payload.get("explain_cost", 0.0),
             "db_error": "",
@@ -100,7 +97,6 @@ async def execute_node(state: SQLSubgraphState) -> SQLSubgraphState:
         logger.error("execute_node MCP call failed: %s", exc)
         tool_call = [{"tool": "execute_query", "status": "error", "duration_ms": duration_ms}]
         return {
-            **state,
             "dataset": [],
             "db_error": f"MCP execution error: {exc}",
             "error_message": f"MCP execution error: {exc}",

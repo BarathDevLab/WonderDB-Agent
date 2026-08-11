@@ -12,19 +12,13 @@ async def init_and_seed() -> None:
     print(f"Connecting to PostgreSQL database '{settings.postgres_db}' at {settings.postgres_host}:{settings.postgres_port}...")
 
     try:
-        from db.migrator import MigrationManager
         from db.postgres import PostgresPool
         from services.schema_rag import sync_schema_catalog
-
-        migrator = MigrationManager()
-        await migrator.run_migrations()
-        print("[OK] All database schema migrations completed successfully.")
 
         # Sync schema catalog vector embeddings for pgvector RAG
         pool = PostgresPool(settings)
         for tenant_id in [
-            "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
-            "b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22",
+            "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
         ]:
             count = await sync_schema_catalog(tenant_id, pool, api_key=settings.gemini_api_key)
             print(f"  [OK] Synchronized {count} pgvector schema embeddings for tenant {tenant_id}.")
