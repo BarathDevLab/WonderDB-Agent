@@ -112,3 +112,34 @@ def test_verifier_requires_semantic_process_mode() -> None:
 
     assert invalid["missing_artifacts"] == ["process_flow"]
     assert valid["verified"] is True
+
+
+def test_verifier_rejects_fabricated_or_unclassified_decision_tree() -> None:
+    common = {
+        "supervisor_plan": {
+            "intent": "query",
+            "visualizations": ["decision_tree"],
+            "needs_explanation": False,
+        },
+        "sql_query": "SELECT risk_score, outcome FROM applications",
+        "raw_data": [{"risk_score": 80, "outcome": "Approve"}],
+        "data_analysis": {"row_count": 1, "data_quality": {}},
+    }
+    invalid = verify_agent_response(
+        **common,
+        visualizations=[{
+            "diagram_type": "decision",
+            "mermaid": "flowchart TD\n  A{Arbitrary median split?}",
+        }],
+    )
+    valid = verify_agent_response(
+        **common,
+        visualizations=[{
+            "diagram_type": "decision",
+            "decision_mode": "learned_classification",
+            "mermaid": "flowchart TD\n  A{risk_score <= 50?}",
+        }],
+    )
+
+    assert invalid["missing_artifacts"] == ["decision_tree"]
+    assert valid["verified"] is True

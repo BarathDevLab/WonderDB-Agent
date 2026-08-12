@@ -68,7 +68,9 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
       case 'er':
         return 'Entity-Relationship (ER) Schema Diagram';
       case 'decision':
-        return 'Decision Tree Process Map';
+        return spec.decision_target
+          ? `Decision Tree — predicting ${spec.decision_target}`
+          : 'Decision Tree';
       case 'process':
       default:
         return 'Process Flow Diagram';

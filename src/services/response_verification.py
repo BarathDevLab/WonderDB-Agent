@@ -85,6 +85,11 @@ def verify_agent_response(
                 "ordered_steps",
                 "agent_pipeline",
             }
+        if diagram_type == "decision":
+            diagram_is_real = diagram_is_real and visual.get("decision_mode") in {
+                "rule_hierarchy",
+                "learned_classification",
+            }
         if diagram_type in _DIAGRAM_TYPES and diagram_is_real:
             delivered.add({
                 "er": "er_diagram",

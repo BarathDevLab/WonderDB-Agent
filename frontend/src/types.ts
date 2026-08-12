@@ -37,6 +37,9 @@ export interface ChartSpec {
 export interface DiagramSpec {
   mermaid?: string;
   diagram_type?: 'er' | 'process' | 'decision';
+  process_mode?: 'state_transitions' | 'ordered_steps' | 'agent_pipeline' | 'not_applicable';
+  decision_mode?: 'rule_hierarchy' | 'learned_classification' | 'not_applicable';
+  decision_target?: string | null;
 }
 
 export interface ToolCall {

@@ -15,8 +15,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import sys
 import uuid as _uuid
+from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -510,20 +512,24 @@ def generate_flowchart(
       - 'er'       : Entity-Relationship diagram from schema FK relationships
       - 'process'  : Semantic state, ordered-step, or agent-execution flow
       - 'decision' : Decision tree with conditional branches (bonus)
-    Returns JSON: {mermaid: str, diagram_type: str, process_mode: str | null}
+    Returns Mermaid plus the diagram type and semantic generation mode.
     """
     raw_data = raw_data or []
     schema = schema or _schema_catalog
+    process_mode = None
+    decision_mode = None
+    decision_target = None
 
     if diagram_type == "er":
         mermaid = _build_er_diagram(schema)
-        process_mode = None
     elif diagram_type == "process":
         process_mode = _detect_process_mode(raw_data)
         mermaid = _build_process_flow(raw_data, title, process_mode)
     elif diagram_type == "decision":
-        mermaid = _build_decision_tree(raw_data, title)
-        process_mode = None
+        decision_mode = _detect_decision_mode(raw_data)
+        mermaid = _build_decision_tree(raw_data, title, decision_mode)
+        if decision_mode == "learned_classification":
+            decision_target = _classification_target(raw_data)
     else:
         diagram_type = "process"
         process_mode = _detect_process_mode(raw_data)
@@ -533,6 +539,8 @@ def generate_flowchart(
         "mermaid": mermaid,
         "diagram_type": diagram_type,
         "process_mode": process_mode,
+        "decision_mode": decision_mode,
+        "decision_target": decision_target,
     })
 
 
@@ -706,79 +714,231 @@ def _build_process_flow(
     ])
 
 
-def _build_decision_tree(raw_data: list[dict[str, Any]], title: str = "") -> str:
-    """Build Mermaid decision tree with conditional branches."""
+_DECISION_TARGET_ALIASES = {
+    "decision", "outcome", "status", "result", "target", "label", "class",
+    "prediction", "recommendation",
+}
+_DECISION_NODE_ID_ALIASES = {"node_id", "decision_node_id", "rule_id"}
+_DECISION_PARENT_ID_ALIASES = {"parent_id", "parent_node_id", "parent_rule_id"}
+_DECISION_LABEL_ALIASES = {"node_label", "question", "condition", "rule", "outcome"}
+_DECISION_BRANCH_ALIASES = {"branch", "branch_label", "edge_label", "answer"}
+
+
+def _decision_keys(raw_data: list[dict[str, Any]]) -> list[str]:
+    return list(dict.fromkeys(key for row in raw_data for key in row))
+
+
+def _classification_target(raw_data: list[dict[str, Any]]) -> str | None:
+    keys = _decision_keys(raw_data)
+    for key in keys:
+        if key.lower().strip() not in _DECISION_TARGET_ALIASES:
+            continue
+        values = {str(row[key]) for row in raw_data if row.get(key) is not None}
+        if 2 <= len(values) <= 12:
+            return key
+    return None
+
+
+def _detect_decision_mode(raw_data: list[dict[str, Any]]) -> str:
+    """Recognize explicit rule trees or labeled data suitable for classification."""
     if not raw_data:
-        return "flowchart TD\n  NO_DATA[No data available]"
+        return "not_applicable"
+    keys = _decision_keys(raw_data)
+    has_hierarchy = all((
+        _find_key(keys, _DECISION_NODE_ID_ALIASES),
+        _find_key(keys, _DECISION_PARENT_ID_ALIASES),
+        _find_key(keys, _DECISION_LABEL_ALIASES),
+    ))
+    if has_hierarchy:
+        return "rule_hierarchy"
+    target_key = _classification_target(raw_data)
+    labeled_rows = [row for row in raw_data if target_key and row.get(target_key) is not None]
+    if not target_key or len(labeled_rows) < 4:
+        return "not_applicable"
+    features = _classification_feature_keys(labeled_rows, target_key)
+    return (
+        "learned_classification"
+        if _best_classification_split(labeled_rows, target_key, features)
+        else "not_applicable"
+    )
 
+
+def _gini(rows: list[dict[str, Any]], target_key: str) -> float:
+    if not rows:
+        return 0.0
+    counts = Counter(str(row[target_key]) for row in rows)
+    return 1.0 - sum((count / len(rows)) ** 2 for count in counts.values())
+
+
+def _numeric_value(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _best_classification_split(
+    rows: list[dict[str, Any]], target_key: str, feature_keys: list[str],
+) -> tuple[str, str, Any, list[dict[str, Any]], list[dict[str, Any]]] | None:
+    parent_impurity = _gini(rows, target_key)
+    feature_order = {key: index for index, key in enumerate(feature_keys)}
+    best: tuple[float, str, str, Any, list[dict[str, Any]], list[dict[str, Any]]] | None = None
+    for key in feature_keys:
+        numeric = [_numeric_value(row.get(key)) for row in rows]
+        numeric_values = sorted({value for value in numeric if value is not None})
+        candidates: list[tuple[str, Any]] = []
+        if len(numeric_values) >= 2 and sum(value is not None for value in numeric) >= len(rows) * 0.8:
+            candidates = [
+                ("numeric", (left + right) / 2)
+                for left, right in zip(numeric_values, numeric_values[1:])
+            ]
+        else:
+            categories = sorted({str(row.get(key)) for row in rows if row.get(key) is not None})
+            if 2 <= len(categories) <= 12:
+                candidates = [("categorical", category) for category in categories]
+
+        for split_type, split_value in candidates:
+            if split_type == "numeric":
+                left_rows = [
+                    row for row in rows
+                    if (value := _numeric_value(row.get(key))) is None or value <= split_value
+                ]
+                right_rows = [
+                    row for row in rows
+                    if (value := _numeric_value(row.get(key))) is not None and value > split_value
+                ]
+            else:
+                left_rows = [row for row in rows if str(row.get(key)) == split_value]
+                right_rows = [row for row in rows if str(row.get(key)) != split_value]
+            if not left_rows or not right_rows:
+                continue
+            weighted = (
+                len(left_rows) * _gini(left_rows, target_key)
+                + len(right_rows) * _gini(right_rows, target_key)
+            ) / len(rows)
+            gain = parent_impurity - weighted
+            candidate = (gain, key, split_type, split_value, left_rows, right_rows)
+            tie_break = (feature_order[key], split_type, str(split_value))
+            best_tie_break = (feature_order[best[1]], best[2], str(best[3])) if best else None
+            if gain > 1e-9 and (
+                best is None
+                or gain > best[0]
+                or (gain == best[0] and tie_break < best_tie_break)
+            ):
+                best = candidate
+    return best[1:] if best else None
+
+
+def _classification_feature_keys(
+    rows: list[dict[str, Any]], target_key: str,
+) -> list[str]:
+    return [
+        key for key in _decision_keys(rows)
+        if key != target_key
+        and not key.lower().endswith("_id")
+        and key.lower() not in {"id", "name", "date", "month", "year", "timestamp"}
+    ]
+
+
+def _format_threshold(value: float) -> str:
+    if value.is_integer() and abs(value) >= 1_000:
+        return f"{int(value):,}"
+    return f"{value:.3g}"
+
+
+def _build_rule_hierarchy(raw_data: list[dict[str, Any]]) -> str:
+    keys = _decision_keys(raw_data)
+    id_key = _find_key(keys, _DECISION_NODE_ID_ALIASES)
+    parent_key = _find_key(keys, _DECISION_PARENT_ID_ALIASES)
+    label_key = _find_key(keys, _DECISION_LABEL_ALIASES)
+    branch_key = _find_key(keys, _DECISION_BRANCH_ALIASES)
+    type_key = next((key for key in keys if key.lower() in {"node_type", "type"}), None)
+    assert id_key and parent_key and label_key
     lines = ["flowchart TD"]
-    keys = list(raw_data[0].keys())
-    
-    # Try to find a decision outcome column
-    decision_key = next((k for k in keys if "decision" in k.lower() or "status" in k.lower() or "outcome" in k.lower()), None)
-    numeric_keys = [k for k in keys if isinstance(raw_data[0][k], (int, float))]
-    
-    if decision_key and numeric_keys:
-        feature_key = numeric_keys[0]
-        values = sorted([float(r.get(feature_key, 0)) for r in raw_data])
-        median = values[len(values) // 2] if values else 0
-        
-        lines.append(f"  ROOT{{\"Is {feature_key} > {median:.1f}?\"}}")
-        
-        above = [r for r in raw_data if float(r.get(feature_key, 0)) > median]
-        below = [r for r in raw_data if float(r.get(feature_key, 0)) <= median]
-        
-        # Aggregate decisions
-        def agg_decision(subset):
-            if not subset:
-                return "Unknown"
-            counts = {}
-            for r in subset:
-                d = str(r.get(decision_key, "Unknown"))
-                counts[d] = counts.get(d, 0) + 1
-            return max(counts.items(), key=lambda x: x[1])[0]
-            
-        above_dec = agg_decision(above)
-        below_dec = agg_decision(below)
-        
-        lines.append(f"  A[\"{decision_key}: {above_dec}\\n({len(above)} cases)\"]")
-        lines.append("  ROOT -->|Yes| A")
-        
-        lines.append(f"  B[\"{decision_key}: {below_dec}\\n({len(below)} cases)\"]")
-        lines.append("  ROOT -->|No| B")
-        
-        return "\n".join(lines)
-
-    # Fallback to simple split
-    label_key = next((k for k in keys if isinstance(raw_data[0][k], str)), keys[0])
-    value_key = next((k for k in keys if isinstance(raw_data[0][k], (int, float))), None)
-
-    if not value_key or len(raw_data) < 2:
-        return _build_process_flow(raw_data, title)
-
-    # Find median for decision split
-    values = sorted([float(r.get(value_key, 0)) for r in raw_data])
-    median = values[len(values) // 2]
-
-    lines.append(f"  ROOT{{\"Is {value_key} > {median:.1f}?\"}}")
-    above = [r for r in raw_data if float(r.get(value_key, 0)) > median]
-    below = [r for r in raw_data if float(r.get(value_key, 0)) <= median]
-
-    for i, row in enumerate(above[:5]):
-        node_id = f"A{i}"
-        label = str(row.get(label_key, f"Item {i+1}"))
-        val = row.get(value_key, "")
-        lines.append(f"  {node_id}[\"{label}: {val}\"]")
-        lines.append(f"  ROOT -->|Yes| {node_id}")
-
-    for i, row in enumerate(below[:5]):
-        node_id = f"B{i}"
-        label = str(row.get(label_key, f"Item {i+1}"))
-        val = row.get(value_key, "")
-        lines.append(f"  {node_id}[\"{label}: {val}\"]")
-        lines.append(f"  ROOT -->|No| {node_id}")
-
+    node_ids: dict[str, str] = {}
+    for index, row in enumerate(raw_data[:40]):
+        raw_id = str(row.get(id_key, index))
+        node_id = f"D{index}"
+        node_ids[raw_id] = node_id
+        label = _mermaid_label(row.get(label_key) or raw_id)
+        node_type = str(row.get(type_key, "")).lower() if type_key else ""
+        shape = f'(["{label}"])' if node_type in {"outcome", "leaf", "result"} else f'{{"{label}"}}'
+        lines.append(f"  {node_id}{shape}")
+    for index, row in enumerate(raw_data[:40]):
+        parent = row.get(parent_key)
+        if parent is None or str(parent) not in node_ids:
+            continue
+        branch = _mermaid_label(row.get(branch_key) or "Next", 24) if branch_key else "Next"
+        lines.append(f"  {node_ids[str(parent)]} -->|{branch}| D{index}")
+    lines.extend([
+        "  classDef outcome fill:#064e3b,stroke:#10b981,color:#f4f4f5",
+    ])
+    outcome_ids = [
+        f"D{index}" for index, row in enumerate(raw_data[:40])
+        if type_key and str(row.get(type_key, "")).lower() in {"outcome", "leaf", "result"}
+    ]
+    if outcome_ids:
+        lines.append(f"  class {','.join(outcome_ids)} outcome")
     return "\n".join(lines)
+
+
+def _build_classification_tree(raw_data: list[dict[str, Any]], target_key: str) -> str:
+    rows = [row for row in raw_data if row.get(target_key) is not None]
+    feature_keys = _classification_feature_keys(rows, target_key)
+    lines = ["flowchart TD"]
+    next_id = 0
+
+    def add_node(subset: list[dict[str, Any]], depth: int) -> str:
+        nonlocal next_id
+        node_id = f"D{next_id}"
+        next_id += 1
+        counts = Counter(str(row[target_key]) for row in subset)
+        prediction, prediction_count = counts.most_common(1)[0]
+        split = None if depth >= 3 or len(counts) == 1 else _best_classification_split(
+            subset, target_key, feature_keys,
+        )
+        if not split:
+            confidence = prediction_count / len(subset)
+            label = _mermaid_label(f"{target_key}: {prediction} | n={len(subset)}, {confidence:.0%}")
+            lines.append(f'  {node_id}(["{label}"])')
+            lines.append(f"  class {node_id} outcome")
+            return node_id
+
+        feature, split_type, split_value, left_rows, right_rows = split
+        if split_type == "numeric":
+            condition = f"{feature} <= {_format_threshold(split_value)}?"
+            left_branch, right_branch = "Yes", "No"
+        else:
+            condition = f"{feature} = {_mermaid_label(split_value, 28)}?"
+            left_branch, right_branch = "Yes", "No"
+        lines.append(f'  {node_id}{{"{_mermaid_label(condition)}"}}')
+        left_id = add_node(left_rows, depth + 1)
+        right_id = add_node(right_rows, depth + 1)
+        lines.append(f"  {node_id} -->|{left_branch}| {left_id}")
+        lines.append(f"  {node_id} -->|{right_branch}| {right_id}")
+        return node_id
+
+    add_node(rows, 0)
+    lines.insert(1, "  classDef outcome fill:#064e3b,stroke:#10b981,color:#f4f4f5")
+    return "\n".join(lines)
+
+
+def _build_decision_tree(
+    raw_data: list[dict[str, Any]], title: str = "", mode: str | None = None,
+) -> str:
+    """Build only traceable rule hierarchies or learned classification trees."""
+    mode = mode or _detect_decision_mode(raw_data)
+    if mode == "rule_hierarchy":
+        return _build_rule_hierarchy(raw_data)
+    if mode == "learned_classification":
+        target_key = _classification_target(raw_data)
+        assert target_key
+        return _build_classification_tree(raw_data, target_key)
+    reason = _mermaid_label(title or "Decision tree requires rules or labeled outcomes", 72)
+    return f'flowchart TD\n  NOT_APPLICABLE["Cannot build a grounded decision tree: {reason}"]'
 
 
 # ---------------------------------------------------------------------------
