@@ -12,6 +12,9 @@ from agent.state import SQLSubgraphState, GlobalState
 from agent.nodes.sql_gen_node import sql_gen_node
 from agent.nodes.execute_node import execute_node
 from agent.nodes.reflect_node import reflect_node
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 MAX_RETRIES = 3
 
@@ -42,7 +45,12 @@ def build_sql_subgraph():
         retry_count = state.get("retry_count", 0)
 
         if has_error and not has_data and retry_count < MAX_RETRIES:
+            logger.info(f"check_db_error: Error detected ({retry_count}/{MAX_RETRIES} retries) -> routing to reflect")
             return "reflect"
+        if has_error and not has_data:
+            logger.info("check_db_error: Max retries exceeded -> routing to END")
+        else:
+            logger.info("check_db_error: Success -> routing to END")
         return END
 
     sg.add_conditional_edges("execute_db", check_db_error)
@@ -69,7 +77,9 @@ async def sql_engine_wrapper(state: GlobalState) -> dict:
         "tool_calls": [],
     }
 
+    logger.info("sql_engine_wrapper: Invoking SQL subgraph")
     result = await compiled_sql_subgraph.ainvoke(sub_state)
+    logger.info("sql_engine_wrapper: SQL subgraph completed")
 
     db_error = result.get("db_error", "").strip()
     has_fatal = bool(db_error) and not result.get("dataset")

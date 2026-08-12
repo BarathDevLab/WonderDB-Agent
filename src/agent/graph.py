@@ -8,6 +8,9 @@ from agent.nodes.supervisor_node import supervisor_node
 from agent.nodes.synthesize_node import synthesize_node
 from agent.sql_subgraph import sql_engine_wrapper
 from agent.nodes.worker_nodes import chart_worker_node, er_worker_node, process_worker_node, decision_worker_node
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def route_after_supervisor(state: GlobalState) -> str:
@@ -23,19 +26,23 @@ def route_after_supervisor(state: GlobalState) -> str:
       default             → sql_engine  (safe fallback)
     """
     if state.get("cached_hit"):
+        logger.info("route_after_supervisor: cached_hit is true -> routing to synthesize")
         return "synthesize"
 
     plan = state.get("supervisor_plan", {})
     intent = plan.get("intent", "query")
 
     if intent in ("chat", "contextual"):
+        logger.info(f"route_after_supervisor: intent is {intent} -> routing to chat")
         return "chat"
     if intent == "error":
+        logger.info("route_after_supervisor: intent is error -> routing to synthesize")
         return "synthesize"
 
     # "query" and "schema" both use sql_engine;
     # for "schema" the supervisor sets only er_diagram in visualizations
     # so sql_gen receives no data request and workers handle diagrams only.
+    logger.info("route_after_supervisor: default path -> routing to sql_engine")
     return "sql_engine"
 
 
@@ -51,12 +58,14 @@ def dynamic_viz_routing(state: GlobalState):
     """
     # Use the structured sentinel — no more fragile string prefix matching
     if state.get("has_fatal_error"):
+        logger.info("dynamic_viz_routing: has_fatal_error is true -> routing to synthesize")
         return "synthesize"
 
     plan = state.get("supervisor_plan", {})
     viz_required = plan.get("visualizations", [])
 
     if not viz_required:
+        logger.info("dynamic_viz_routing: no visualizations requested -> routing to synthesize")
         return "synthesize"
 
     sends = []
@@ -80,8 +89,10 @@ def dynamic_viz_routing(state: GlobalState):
 
     # No qualifying sends (e.g. schema viz requested but no schema retrieved)
     if not sends:
+        logger.info("dynamic_viz_routing: no qualifying sends -> routing to synthesize")
         return "synthesize"
 
+    logger.info(f"dynamic_viz_routing: fanning out to workers: {[s.node for s in sends]}")
     return sends
 
 

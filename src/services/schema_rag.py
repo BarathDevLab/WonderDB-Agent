@@ -295,6 +295,16 @@ class SchemaRAGService:
         count = 0
         try:
             async with pool.acquire() as conn:
+                # Fetch existing schema descriptions to avoid redundant embedding calls
+                existing_records = await conn.fetch(
+                    "SELECT table_name, column_name, description FROM schema_catalog WHERE tenant_id = $1::uuid",
+                    tenant_id
+                )
+                existing_map = {
+                    (r["table_name"], r["column_name"]): r["description"] 
+                    for r in existing_records
+                }
+
                 for table in catalog:
                     t_name = table["table_name"]
                     t_desc = table.get("description", "")
@@ -314,6 +324,10 @@ class SchemaRAGService:
                         )
                         if is_fk and fk_table:
                             desc_text += f". References {fk_table}.{fk_col}"
+
+                        # Skip if we already have this exact description embedded
+                        if existing_map.get((t_name, c_name)) == desc_text:
+                            continue
 
                         # Generate embedding via Gemini
                         vec = await generate_embedding(desc_text, api_key=api_key, model=model)
@@ -349,7 +363,7 @@ class SchemaRAGService:
                         await asyncio.sleep(2.0)
 
             logger.info(
-                "Phase 2 – Upserted %d schema embeddings for tenant %s", count, tenant_id
+                "Phase 2 – Upserted %d new/updated schema embeddings for tenant %s", count, tenant_id
             )
         except Exception as exc:
             logger.error(

@@ -7,6 +7,9 @@ Enriches the error context and increments the retry counter so
 sql_gen_node can generate a corrected query on the next attempt.
 """
 from agent.state import SQLSubgraphState
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 async def reflect_node(state: SQLSubgraphState) -> SQLSubgraphState:
@@ -39,6 +42,8 @@ async def reflect_node(state: SQLSubgraphState) -> SQLSubgraphState:
         "  6. GROUP BY includes all non-aggregated columns in SELECT.",
         "  7. NULL comparisons use IS NULL / IS NOT NULL.",
     ])
+
+    logger.warning(f"Reflection triggered (attempt {retry_count}). Error: {db_error}")
 
     return {
         "retry_count": retry_count,

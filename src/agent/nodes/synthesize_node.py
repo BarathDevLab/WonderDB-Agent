@@ -17,7 +17,6 @@ Bug fixes applied:
 from __future__ import annotations
 
 import json
-import logging
 import time
 from typing import Any
 
@@ -26,8 +25,9 @@ from agent.state import GlobalState
 from app.config import get_settings
 from services.semantic_cache import set_semantic_cache
 from services.session_memory import append_session_event
+from utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def _call_tool(session: Any, tool_name: str, arguments: dict) -> dict[str, Any]:
@@ -51,23 +51,50 @@ def _build_explain_prompt(
         "decision": "Decision tree diagram",
     }
 
-    sections: list[str] = [f"User request: {original_prompt}"]
+    schema_context = "(No schema provided)"
+    if retrieved_schemas:
+        schema_context = ", ".join(t.get("table_name", "") for t in retrieved_schemas)
 
+    visuals_context = []
     if diagram_specs:
         types = [_DIAGRAM_LABELS.get(d.get("diagram_type", ""), d.get("diagram_type", "")) for d in diagram_specs]
-        sections.append("Diagrams generated:\n" + "\n".join(f"  • {t}" for t in types))
-
+        visuals_context.append("Diagrams generated: " + ", ".join(types))
     if has_chart:
-        sections.append("A chart visualization was also generated for the numeric data.")
+        visuals_context.append("A chart visualization was generated.")
 
-    if raw_results:
-        sections.append(f"Query returned {len(raw_results)} rows of data (first 10 shown below).")
+    prompt_template = f"""Act as an expert data analyst and business intelligence specialist.
 
-    if retrieved_schemas and not raw_results:
-        table_names = [t.get("table_name", "") for t in retrieved_schemas]
-        sections.append(f"Schema contains tables: {', '.join(table_names)}")
+**The Goal:**
+Explain the results of the database query based on the user's original request: "{original_prompt}"
 
-    return "\n\n".join(sections)
+**Database Schema / Structure Context:**
+Relevant tables involved: {schema_context}
+
+**Visualizations / Artifacts:**
+{chr(10).join(visuals_context) if visuals_context else "None"}
+
+**Data Results:**
+{f"Query returned {len(raw_results)} rows of data." if raw_results else "No data returned."}
+
+**Strict Output Rules:**
+1. You MUST format your response exactly using the Markdown template below. Do not deviate from this structure.
+2. DO NOT explain the database schema or ER diagrams unless the user explicitly asked how the database works. Focus strictly on the data and business insights.
+
+**Mandatory Markdown Template to use for your response:**
+### **Executive Performance Summary**
+
+**Overview**
+[1-2 sentences summarizing the main finding answering the user's prompt]
+
+**Key Data Insights**
+*   **[Insight 1 Heading]:** [Brief explanation with specific numbers]
+*   **[Insight 2 Heading]:** [Brief explanation with specific numbers]
+
+**Strategic Recommendations**
+1.  **[Actionable Recommendation 1]**
+2.  **[Actionable Recommendation 2]**
+"""
+    return prompt_template
 
 
 async def synthesize_node(state: GlobalState) -> GlobalState:
@@ -89,6 +116,7 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
 
     # ── Fast path: cache hit — return minimal delta ─────────────────────────
     # Bug fix: was returning full `state` (incorrect — must return delta only)
+    logger.info(f"Synthesize node starting for session {session_id}. Needs explanation: {needs_explanation}")
     if state.get("cached_hit"):
         summary = state.get("summary", "")
         return {
@@ -163,6 +191,7 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
                     "prompt": rich_prompt,
                     "raw_results": explain_rows,
                 })
+                logger.info("explain_data tool call succeeded.")
                 summary = payload.get("summary", "")
                 duration_ms = round((time.monotonic() - t0) * 1000, 1)
                 extra_tool_calls.append({"tool": "explain_data", "status": "done", "duration_ms": duration_ms})
@@ -211,6 +240,7 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
         logger.warning("Session memory append failed: %s", exc)
 
     # Return delta only — include new tool_calls so operator.add can merge them
+    logger.info(f"Synthesis complete for session {session_id}. Summary length: {len(summary)}")
     return {
         "summary": summary,
         "tool_calls": extra_tool_calls,

@@ -13,7 +13,6 @@ instruction that matches the sub-intent detected from the user's words.
 """
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import httpx
@@ -21,8 +20,9 @@ import httpx
 from agent.state import GlobalState
 from app.config import get_settings
 from services.session_memory import get_session_history, append_session_event
+from utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ── Keyword sets ────────────────────────────────────────────────────────────
@@ -111,6 +111,8 @@ async def chat_node(state: GlobalState) -> GlobalState:
     # Bug fix: was defaulting to literal "default" which could cause
     # session collision if multiple tenants sent chat messages simultaneously.
     session_id = state.get("session_id") or f"session-{tenant_id}"
+
+    logger.info(f"Chat node starting for session {session_id}. Intent: {intent}")
 
     prompt_lower = prompt.lower()
     context = ""

@@ -16,6 +16,9 @@ from typing import Any
 
 from agent.state import GlobalState
 from core.sse_formatter import format_sse_event
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 async def run_langgraph_sse(
@@ -25,18 +28,25 @@ async def run_langgraph_sse(
     stream_mode: str = "updates",
 ) -> AsyncIterator[str]:
     """Stream LangGraph state transitions as typed SSE frames without buffering."""
+    logger.info("SSE Stream starting")
     yield format_sse_event(
         "status",
         {"phase": "planning", "message": "Analyzing prompt and retrieving schema..."},
     )
+
+    local_visualizations = []
 
     async for chunk in graph.astream(initial_state, stream_mode=stream_mode):
         if not isinstance(chunk, dict):
             continue
 
         for node_name, state_update in chunk.items():
+            logger.info(f"SSE generating events for node: {node_name}")
             if not isinstance(state_update, dict):
                 continue
+
+            if "visualizations" in state_update:
+                local_visualizations.extend(state_update["visualizations"])
 
             # ── supervisor ────────────────────────────────────────────────
             if node_name == "supervisor":
@@ -110,9 +120,8 @@ async def run_langgraph_sse(
 
             # ── chat / synthesize (terminal nodes) ────────────────────────
             elif node_name in ("chat", "synthesize"):
-                visualizations = state_update.get("visualizations", [])
-                chart_spec = next((v for v in visualizations if "type" in v), {})
-                diagram_specs = [v for v in visualizations if "diagram_type" in v]
+                chart_spec = next((v for v in local_visualizations if "type" in v), {})
+                diagram_specs = [v for v in local_visualizations if "diagram_type" in v]
 
                 yield format_sse_event(
                     "final_response",
@@ -124,4 +133,5 @@ async def run_langgraph_sse(
                     },
                 )
 
+    logger.info("SSE Stream complete")
     yield format_sse_event("complete", {"ok": True})

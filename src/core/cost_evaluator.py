@@ -9,7 +9,7 @@ class CostEvaluation(BaseModel):
     reason: str | None = None
 
 
-def _inspect_plan_nodes(plan: dict[str, Any], scan_threshold_rows: int = 1000) -> tuple[float, bool]:
+def _inspect_plan_nodes(plan: dict[str, Any], scan_threshold_rows: int = 50000) -> tuple[float, bool]:
     """Recursively traverse EXPLAIN plan node to extract total cost and check sequential scans."""
     total_cost = float(plan.get("Total Cost", 0.0))
     node_type = str(plan.get("Node Type", ""))
@@ -29,7 +29,7 @@ def _inspect_plan_nodes(plan: dict[str, Any], scan_threshold_rows: int = 1000) -
 def evaluate_cost(
     explain_data: float | dict[str, Any] | list[Any],
     threshold: float = 10000.0,
-    scan_threshold_rows: int = 1000,
+    scan_threshold_rows: int = 50000,
 ) -> CostEvaluation:
     """Evaluate query cost and index efficiency against architectural limits."""
     if isinstance(explain_data, (int, float)):

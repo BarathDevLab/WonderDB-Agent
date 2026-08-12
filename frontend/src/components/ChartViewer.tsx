@@ -125,20 +125,20 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({ spec }) => {
   };
 
   return (
-    <div className="my-2.5 rounded-xl border border-zinc-800 bg-[#111216] p-3.5">
-      <div className="flex items-center justify-between gap-2 mb-3 border-b border-zinc-800 pb-2">
+    <div className="mt-4 mb-2 rounded-2xl overflow-hidden bg-[#1e1f20] border border-zinc-800/50 shadow-md max-w-4xl">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800/50 bg-[#1e1f20]">
         <div className="flex items-center gap-2">
           {getChartIcon()}
-          <span className="text-xs font-semibold text-zinc-200">
+          <span className="text-[13px] font-semibold text-zinc-300">
             {spec.options?.plugins?.title?.text || `${chartType.toUpperCase()} Visualization`}
           </span>
         </div>
-        <span className="rounded bg-zinc-800 px-1.5 py-0.2 text-[9px] font-mono text-zinc-400 uppercase">
+        <span className="rounded bg-zinc-800/50 px-2 py-0.5 text-[10px] font-mono text-zinc-400 uppercase">
           {chartType}
         </span>
       </div>
 
-      <div className="h-60 sm:h-64 w-full">
+      <div className="h-60 sm:h-64 w-full p-4">
         {chartType === 'line' && <Line data={enhancedData} options={chartOptions} />}
         {chartType === 'bar' && <Bar data={enhancedData} options={chartOptions} />}
         {chartType === 'doughnut' && <Doughnut data={enhancedData} options={chartOptions} />}

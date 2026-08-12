@@ -8,7 +8,9 @@ import { DiagramViewer } from './components/DiagramViewer';
 import { ToolCallBadge } from './components/ToolCallBadge';
 import { SchemaDrawer } from './components/SchemaDrawer';
 import { ChatInput } from './components/ChatInput';
+import { CodeBlock } from './components/CodeBlock';
 import { useAgentStream } from './hooks/useAgentStream';
+import ReactMarkdown from 'react-markdown';
 import {
   Database,
   User,
@@ -105,7 +107,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#090a0d] text-zinc-100 selection:bg-zinc-700 selection:text-white">
+    <div className="flex h-screen w-screen overflow-hidden bg-[#131314] text-zinc-100 selection:bg-zinc-700 selection:text-white font-sans">
       {/* Left Sidebar */}
       <Sidebar
         sessions={sessions}
@@ -149,7 +151,7 @@ export const App: React.FC = () => {
           <div className="mx-auto max-w-3xl space-y-5">
             {/* Welcome Screen when Session is Empty */}
             {messages.length === 0 && !currentMessage && (
-              <div className="my-6 rounded-2xl border border-zinc-800 bg-[#111216] p-6 sm:p-8 shadow-lg animate-fadeIn">
+              <div className="my-6 rounded-2xl border border-zinc-800/50 bg-[#1e1f20] p-6 sm:p-8 shadow-lg animate-fadeIn">
                 <div className="flex flex-col items-center text-center">
                   <div className="mb-3.5 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200">
                     <Database className="h-5 w-5" />
@@ -247,8 +249,8 @@ export const App: React.FC = () => {
                 {msg.sender === 'user' ? (
                   /* User Message */
                   <div className="flex items-start justify-end gap-2.5">
-                    <div className="max-w-2xl rounded-2xl rounded-tr-sm bg-[#1a1b22] border border-zinc-700/70 p-3.5 text-xs sm:text-sm text-zinc-100 shadow-sm">
-                      <p className="leading-relaxed">{msg.prompt}</p>
+                    <div className="max-w-2xl rounded-2xl rounded-tr-sm bg-[#1e1f20] p-4 text-[15px] text-zinc-100 shadow-sm">
+                      <p className="leading-relaxed whitespace-pre-wrap">{msg.prompt}</p>
                       <div className="mt-1.5 flex items-center justify-end gap-2 text-[10px] font-mono text-zinc-400">
                         <span>{activeTenantObj.name}</span>
                         <span>•</span>
@@ -261,11 +263,11 @@ export const App: React.FC = () => {
                   </div>
                 ) : (
                   /* Assistant Message: Ordered exactly as Thinking -> Summary -> Table -> Chart */
-                  <div className="flex items-start gap-2.5">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 shrink-0 mt-0.5">
-                      <Terminal className="h-3.5 w-3.5" />
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 shrink-0 mt-1">
+                      <Terminal className="h-4 w-4" />
                     </div>
-                    <div className="flex-1 overflow-hidden space-y-2">
+                    <div className="flex-1 overflow-hidden space-y-4">
                       {/* 1. Sleek Claude Thinking bar */}
                       <ThoughtTracker message={msg} />
 
@@ -293,62 +295,31 @@ export const App: React.FC = () => {
 
                       {/* 6. AI Insight — shown AFTER diagrams, table, and chart so it explains everything above */}
                       {msg.summary && (
-                        <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl overflow-hidden">
-                          {/* Label bar */}
-                          <div className="flex items-center gap-2 px-3.5 py-2 border-b border-zinc-800 bg-[#0f1013]">
-                            <TrendingUp className="h-3.5 w-3.5 text-indigo-400" />
-                            <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">AI Insight</span>
+                        <div className="text-[15px] text-zinc-200 leading-relaxed font-sans">
+                          <div className="prose prose-sm prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-[#1e1f20] prose-pre:border prose-pre:border-zinc-800">
+                            <ReactMarkdown>{msg.summary}</ReactMarkdown>
                           </div>
-                          <div className="px-3.5 py-3">
-                            <p className="whitespace-pre-wrap">{msg.summary}</p>
 
-                            {/* Action Toolbar */}
-                            <div className="mt-2.5 pt-2 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => handleCopySummary(msg.id, msg.summary || '')}
-                                  className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-[11px] font-mono"
-                                  title="Copy answer"
-                                >
-                                  {copiedMsgId === msg.id ? (
-                                    <>
-                                      <Check className="h-3 w-3 text-emerald-400" />
-                                      <span className="text-emerald-400">Copied</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Copy className="h-3 w-3" />
-                                      <span>Copy</span>
-                                    </>
-                                  )}
-                                </button>
-
-                                {msg.sqlQuery && (
-                                  <button
-                                    onClick={() => toggleInlineSql(msg.id)}
-                                    className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-[11px] font-mono text-zinc-400"
-                                  >
-                                    <Code2 className="h-3 w-3" />
-                                    <span>{visibleSqlMsgIds[msg.id] ? 'Hide SQL' : 'View SQL'}</span>
-                                  </button>
-                                )}
-                              </div>
-
-                              <span className="text-[10px] font-mono text-zinc-500">
-                                RLS Enforced
-                              </span>
-                            </div>
-
-                            {/* Inline SQL Viewer */}
-                            {visibleSqlMsgIds[msg.id] && msg.sqlQuery && (
-                              <div className="mt-2.5 rounded border border-zinc-800 bg-[#07080a] p-3 overflow-x-auto">
-                                <pre className="font-mono text-xs text-zinc-300 leading-relaxed select-all">
-                                  <code>{msg.sqlQuery}</code>
-                                </pre>
-                              </div>
-                            )}
+                          {/* Action Toolbar */}
+                          <div className="mt-2 flex items-center justify-start gap-2 text-xs text-zinc-400">
+                            <button
+                              onClick={() => handleCopySummary(msg.id, msg.summary || '')}
+                              className="p-1.5 rounded-full hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors"
+                              title="Copy answer"
+                            >
+                              {copiedMsgId === msg.id ? (
+                                <Check className="h-4 w-4 text-emerald-400" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
+                            </button>
                           </div>
                         </div>
+                      )}
+
+                      {/* Code Block for SQL */}
+                      {msg.sqlQuery && (
+                        <CodeBlock code={msg.sqlQuery} language="SQL" />
                       )}
                     </div>
                   </div>
@@ -359,11 +330,11 @@ export const App: React.FC = () => {
             {/* Active Streaming Message */}
             {currentMessage && (
               <div className="space-y-3 animate-fadeIn">
-                <div className="flex items-start gap-2.5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 shrink-0 mt-0.5">
-                    <Terminal className="h-3.5 w-3.5 animate-pulse" />
+                <div className="flex items-start gap-4">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 shrink-0 mt-1">
+                    <Terminal className="h-4 w-4 animate-pulse" />
                   </div>
-                  <div className="flex-1 overflow-hidden space-y-2">
+                  <div className="flex-1 overflow-hidden space-y-4">
                     {/* 1. Sleek Claude Thinking bar */}
                     <ThoughtTracker message={currentMessage} />
 
@@ -391,15 +362,16 @@ export const App: React.FC = () => {
 
                     {/* 5. AI Insight — shown AFTER diagrams, table, and chart */}
                     {currentMessage.summary && (
-                      <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-sans bg-[#121316] border border-zinc-800 rounded-xl overflow-hidden">
-                        <div className="flex items-center gap-2 px-3.5 py-2 border-b border-zinc-800 bg-[#0f1013]">
-                          <TrendingUp className="h-3.5 w-3.5 text-indigo-400" />
-                          <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">AI Insight</span>
-                        </div>
-                        <div className="px-3.5 py-3">
-                          <p className="whitespace-pre-wrap">{currentMessage.summary}</p>
+                      <div className="text-[15px] text-zinc-200 leading-relaxed font-sans">
+                        <div className="prose prose-sm prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-[#1e1f20] prose-pre:border prose-pre:border-zinc-800">
+                          <ReactMarkdown>{currentMessage.summary}</ReactMarkdown>
                         </div>
                       </div>
+                    )}
+
+                    {/* Code Block for SQL */}
+                    {currentMessage.sqlQuery && (
+                      <CodeBlock code={currentMessage.sqlQuery} language="SQL" />
                     )}
                   </div>
                 </div>

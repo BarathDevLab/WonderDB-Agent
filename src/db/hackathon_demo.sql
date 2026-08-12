@@ -91,6 +91,13 @@ CREATE TABLE IF NOT EXISTS returns (
     returned_at TIMESTAMP WITH TIME ZONE
 );
 
+-- Indexes for performance on commonly filtered/joined columns
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_returns_order_id ON returns(order_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_order_id ON shipments(order_id);
+CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+
 -- ============================================================================
 -- Seed Data Injection (20 Records Spread Over 6 Months)
 -- ============================================================================

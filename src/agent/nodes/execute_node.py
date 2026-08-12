@@ -9,15 +9,15 @@ This node is now a thin MCP client wrapper for the SQL Subgraph.
 from __future__ import annotations
 
 import json
-import logging
 import re
 import time
 from typing import Any
 
 from agent.mcp_client import get_mcp_session
 from agent.state import SQLSubgraphState
+from utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def _sanitize_sql(sql: str) -> str:
     """
@@ -61,6 +61,7 @@ async def execute_node(state: SQLSubgraphState) -> SQLSubgraphState:
 
     t0 = time.monotonic()
     try:
+        logger.info(f"Executing SQL via MCP for tenant {tenant_id}: {sql}")
         session = await get_mcp_session()
         result = await session.call_tool(
             "execute_query",
@@ -84,8 +85,10 @@ async def execute_node(state: SQLSubgraphState) -> SQLSubgraphState:
                 "tool_calls": tool_call,
             }
 
+        dataset = payload.get("raw_results", [])
+        logger.info(f"Successfully retrieved {len(dataset)} rows. Explain cost: {payload.get('explain_cost', 0.0)}")
         return {
-            "dataset": payload.get("raw_results", []),
+            "dataset": dataset,
             "explain_cost": payload.get("explain_cost", 0.0),
             "db_error": "",
             "error_message": "",

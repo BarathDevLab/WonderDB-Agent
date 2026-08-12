@@ -11,7 +11,6 @@ Does NOT generate SQL. Does NOT execute queries.
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 
 from agent.state import GlobalState
@@ -20,8 +19,9 @@ from db.postgres import get_shared_pool
 from services.schema_rag import retrieve_schema_context
 from services.semantic_cache import get_semantic_cache
 from services.session_memory import append_session_event
+from utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -112,24 +112,6 @@ OUTPUT RULES
 - Always set needs_explanation=true for query and schema intents.
 """
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Fast-path keyword sets (skip LLM call for trivial inputs)
-# ─────────────────────────────────────────────────────────────────────────────
-
-_QUICK_CHAT_KEYWORDS = frozenset({
-    "hi", "hello", "hey", "hiya", "howdy",
-    "good morning", "good evening", "good afternoon",
-    "greetings", "sup", "yo",
-})
-
-_QUICK_CONTEXTUAL_KEYWORDS = (
-    "simpler", "simple", "plain english", "layman",
-    "explain simpler", "explain that", "explain above", "explain this",
-    "what does this mean", "what does that mean",
-    "continue", "tell me more", "more details", "elaborate",
-    "go on", "and?", "more", "keep going",
-)
 
 _MAX_PROMPT_CHARS = 2000
 
@@ -227,6 +209,7 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     cache_enabled = state.get("enable_cache", settings.enable_semantic_cache)
 
     # ── 1. Prompt validation ────────────────────────────────────────────────
+    logger.info(f"Supervisor starting for session {session_id} with prompt: {prompt!r}")
     if not prompt:
         return {
             "supervisor_plan": {"intent": "error", "visualizations": [], "needs_explanation": False},
@@ -239,30 +222,6 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     if len(prompt) > _MAX_PROMPT_CHARS:
         prompt = prompt[:_MAX_PROMPT_CHARS]
 
-    prompt_lower = prompt.lower()
-
-    # ── 2. Deterministic fast-path routing ─────────────────────────────────
-    # Check both exact match and "word in prompt" for greetings
-    is_greeting = (
-        prompt_lower in _QUICK_CHAT_KEYWORDS
-        or any(kw in prompt_lower for kw in _QUICK_CHAT_KEYWORDS)
-    )
-    if is_greeting:
-        return {
-            "supervisor_plan": {"intent": "chat", "visualizations": [], "needs_explanation": False},
-            "has_fatal_error": False,
-            "error_detail": "",
-            "current_phase": "planning_complete",
-        }
-
-    is_contextual = any(kw in prompt_lower for kw in _QUICK_CONTEXTUAL_KEYWORDS)
-    if is_contextual:
-        return {
-            "supervisor_plan": {"intent": "contextual", "visualizations": [], "needs_explanation": True},
-            "has_fatal_error": False,
-            "error_detail": "",
-            "current_phase": "planning_complete",
-        }
 
     # ── 3. Semantic cache gate ──────────────────────────────────────────────
     if cache_enabled:
@@ -334,6 +293,8 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
         "intent": plan.get("intent", "query"),
         "cache_hit": False,
     })
+
+    logger.info(f"Supervisor classification complete. Intent: {plan.get('intent')}, Plan: {plan}")
 
     return {
         "cached_hit": False,

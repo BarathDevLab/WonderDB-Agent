@@ -101,91 +101,64 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   return (
-    <div className="sticky bottom-0 z-20 w-full bg-gradient-to-t from-[#090a0d] via-[#090a0d]/95 to-transparent pt-3 pb-4 px-3 sm:px-6">
-      <div className="mx-auto max-w-3xl space-y-2.5">
-        {/* Suggestion Chips */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
-          <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider font-medium shrink-0 mr-1">
-            Presets:
-          </span>
-          {PROMPT_SUGGESTIONS.map((item) => (
-            <button
-              key={item.label}
-              onClick={() => onSend(item.prompt)}
-              disabled={isStreaming}
-              className="shrink-0 rounded-md border border-zinc-800 bg-zinc-900/80 hover:bg-zinc-800 hover:border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-40"
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-
+    <div className="sticky bottom-0 z-20 w-full bg-[#131314] pt-2 pb-6 px-3 sm:px-6">
+      <div className="mx-auto max-w-3xl space-y-3">
         {/* Input Box */}
         <form onSubmit={handleSubmit} className="relative">
-          <div className="relative flex flex-col rounded-2xl border border-zinc-800 bg-[#121316] shadow-xl focus-within:border-zinc-600 focus-within:ring-1 focus-within:ring-zinc-600 transition-all">
+          <div className="relative flex items-center rounded-full bg-[#1e1f20] px-3 py-1.5 focus-within:ring-1 focus-within:ring-zinc-600 transition-all">
+            {/* Textarea */}
             <textarea
               ref={textareaRef}
               rows={1}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask anything about PostgreSQL schema or business metrics..."
+              placeholder="Ask Database Agent..."
               disabled={isStreaming}
-              className="w-full resize-none bg-transparent px-4 sm:px-5 pt-3.5 pb-2 text-xs sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none disabled:opacity-50 max-h-40 leading-relaxed"
+              className="flex-1 resize-none bg-transparent px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none disabled:opacity-50 max-h-32 leading-relaxed"
             />
 
-            {/* Bottom Actions Row inside Prompt Box */}
-            <div className="flex items-center justify-between px-3 sm:px-4 pb-2.5 pt-1">
-              <div className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-500">
-                <span>pgvector RAG • AST Cost Gate</span>
-              </div>
+            {/* Right Actions */}
+            <div className="flex items-center gap-1 shrink-0 px-1">
+              <button
+                type="button"
+                onClick={toggleListening}
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                  isListening
+                    ? 'bg-rose-500/20 text-rose-500 animate-pulse'
+                    : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+                }`}
+                title={isListening ? "Stop listening" : "Start voice input"}
+              >
+                {isListening ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+              </button>
 
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono text-zinc-500 hidden md:inline">
-                  Enter ↵
-                </span>
-
+              {isStreaming ? (
                 <button
                   type="button"
-                  onClick={toggleListening}
-                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-                    isListening
-                      ? 'bg-rose-500/20 text-rose-500 animate-pulse'
-                      : 'bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-300'
-                  }`}
-                  title={isListening ? "Stop listening" : "Start voice input"}
+                  onClick={onCancel}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-200 hover:bg-white text-zinc-900 transition-colors ml-1"
+                  title="Stop generation"
                 >
-                  {isListening ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
+                  <Square className="h-3 w-3 fill-current" />
                 </button>
-
-                {isStreaming ? (
-                  <button
-                    type="button"
-                    onClick={onCancel}
-                    className="flex h-7 w-7 items-center justify-center rounded-md bg-rose-600 hover:bg-rose-500 text-white transition-colors"
-                    title="Stop generation"
-                  >
-                    <Square className="h-3 w-3" />
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={!prompt.trim()}
-                    className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-100 hover:bg-white text-zinc-950 font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed active:scale-95"
-                    title="Execute query"
-                  >
-                    <ArrowUp className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!prompt.trim()}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-200 hover:bg-white text-zinc-900 transition-all ml-1 active:scale-95 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed"
+                  title="Send message"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </button>
+              )}
             </div>
           </div>
         </form>
 
         {/* Footer Microcopy */}
-        <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono px-1">
-          <span>Protected with pgvector RAG, AST static analysis & RLS isolation</span>
-          <span className="hidden sm:inline">PostgreSQL Copilot</span>
+        <div className="mt-2 text-center text-[10px] text-zinc-500">
+          Database agent may display inaccurate info, including about people, so double-check its responses.
         </div>
       </div>
     </div>

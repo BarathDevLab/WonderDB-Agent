@@ -9,13 +9,13 @@ Lives exclusively inside the SQL Subgraph — never called from the main graph d
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 
 from agent.state import SQLSubgraphState
 from app.config import get_settings
+from utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _format_schema_ddl(schemas: list[dict[str, Any]] | str) -> str:
@@ -200,10 +200,13 @@ async def sql_gen_node(state: SQLSubgraphState) -> SQLSubgraphState:
     schema_ddl = _format_schema_ddl(prisma_context) if prisma_context else "(no schema available)"
 
     if not settings.gemini_api_key or not settings.gemini_model:
+        logger.error("SQL generation failed: Gemini API key or model not configured.")
         return {
             "db_error": "SQL generation failed: Gemini API key/model not configured.",
             "generated_sql": "",
         }
+
+    logger.info(f"Generating SQL for prompt: {prompt!r}")
 
     sql_query = await _generate_sql(
         prompt=prompt,
@@ -214,10 +217,13 @@ async def sql_gen_node(state: SQLSubgraphState) -> SQLSubgraphState:
     )
 
     if not sql_query:
+        logger.error("SQL generation failed: model returned no valid SQL.")
         return {
             "db_error": "SQL generation failed: model returned no valid SQL.",
             "generated_sql": "",
         }
+
+    logger.info(f"Generated SQL: {sql_query}")
 
     return {
         "generated_sql": sql_query,

@@ -9,12 +9,12 @@
   --font-body: 'Plus Jakarta Sans', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  /* Enterprise Charcoal & Zinc System (Linear / Vercel Standard) */
-  --bg-space: #090a0d;
-  --bg-sidebar: #0d0e12;
-  --bg-card: #131419;
-  --bg-card-hover: #191b22;
-  --bg-input: #111216;
+  /* Gemini-style Dark Theme */
+  --bg-space: #131314;
+  --bg-sidebar: #1e1f20;
+  --bg-card: #1e1f20;
+  --bg-card-hover: #28292a;
+  --bg-input: #1e1f20;
   
   --border-subtle: rgba(255, 255, 255, 0.07);
   --border-medium: rgba(255, 255, 255, 0.12);

@@ -10,7 +10,7 @@ mermaid.initialize({
   fontFamily: 'ui-sans-serif, system-ui, sans-serif',
   themeVariables: {
     darkMode: true,
-    background: '#0d0e12',
+    background: '#1e1f20',
     primaryColor: '#6366f1',
     primaryTextColor: '#f4f4f5',
     primaryBorderColor: '#4f46e5',
@@ -94,9 +94,9 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
   };
 
   return (
-    <div className="my-3 rounded-xl border border-zinc-800 bg-[#0d0e12] overflow-hidden shadow-md">
+    <div className="mt-4 mb-2 rounded-2xl border border-zinc-800/50 bg-[#1e1f20] overflow-hidden shadow-md max-w-4xl">
       {/* Diagram Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-[#13141a] border-b border-zinc-800/80">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800/50 bg-[#1e1f20]">
         <div className="flex items-center gap-2">
           {getIcon()}
           <span className="text-xs font-semibold text-zinc-200">{getTitle()}</span>
@@ -128,7 +128,7 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
         {error ? (
           <div className="w-full">
             <p className="text-xs text-amber-400 font-mono mb-2">{error}</p>
-            <pre className="text-[11px] font-mono text-zinc-400 bg-zinc-900 p-3 rounded overflow-x-auto">
+            <pre className="text-[11px] font-mono text-zinc-400 bg-black/20 p-3 rounded overflow-x-auto">
               {mermaidCode}
             </pre>
           </div>
