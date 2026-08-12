@@ -15,6 +15,10 @@ class FakeRedis:
             raise self.ping_error
         return True
 
+    async def get(self, key: str):
+        del key
+        return None
+
     async def scan_iter(self, match: str, count: int = 10):
         del count
         prefix = match.removesuffix("*")
@@ -65,3 +69,23 @@ async def test_flush_propagates_redis_failure(monkeypatch) -> None:
 
     with pytest.raises(ConnectionError, match="Redis unavailable"):
         await SemanticCacheService().flush_all()
+
+
+@pytest.mark.asyncio
+async def test_contextual_exact_lookup_does_not_run_similarity_search(monkeypatch) -> None:
+    redis = FakeRedis(["semantic_cache:unrelated"])
+
+    async def fake_client() -> FakeRedis:
+        return redis
+
+    async def unexpected_embedding(prompt: str):
+        raise AssertionError(f"Embedding should not be called for exact-only lookup: {prompt}")
+
+    monkeypatch.setattr(semantic_cache_module, "get_redis_client", fake_client)
+    monkeypatch.setattr(semantic_cache_module, "_get_neural_embedding", unexpected_embedding)
+
+    result = await SemanticCacheService().get(
+        "resolved conversational prompt", "tenant-a", exact_only=True,
+    )
+
+    assert result is None

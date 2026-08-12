@@ -204,6 +204,7 @@ export function useAgentStream(initialTenantId: string) {
             prompt,
             tenant_id: tenantId,
             user_id: 'console-operator',
+            session_id: targetSessionId,
           }),
           signal: controller.signal,
         });

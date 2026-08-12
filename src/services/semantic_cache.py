@@ -103,7 +103,11 @@ class SemanticCacheService:
         return f"semantic_cache:{digest}"
 
     async def get(
-        self, prompt: str, tenant_id: str = "default", similarity_threshold: float | None = None
+        self,
+        prompt: str,
+        tenant_id: str = "default",
+        similarity_threshold: float | None = None,
+        exact_only: bool = False,
     ) -> dict[str, Any] | None:
         threshold = similarity_threshold if similarity_threshold is not None else self._similarity_threshold
         exact_key = self._hash_key(prompt, tenant_id)
@@ -116,6 +120,11 @@ class SemanticCacheService:
             if data:
                 item = json.loads(data)
                 return item.get("payload", item)
+
+            # Resolved conversational prompts already encode exact prior-turn
+            # state. A merely similar entry may belong to different context.
+            if exact_only:
+                return None
 
             # ── Tier 2: vector similarity scan ──────────────────────────
             # Generate embedding only if there are cached entries to search
@@ -233,9 +242,14 @@ semantic_cache_service = SemanticCacheService()
 
 
 async def get_semantic_cache(
-    prompt: str, tenant_id: str = "default", similarity_threshold: float = 0.75
+    prompt: str,
+    tenant_id: str = "default",
+    similarity_threshold: float = 0.75,
+    exact_only: bool = False,
 ) -> dict[str, Any] | None:
-    return await semantic_cache_service.get(prompt, tenant_id, similarity_threshold)
+    return await semantic_cache_service.get(
+        prompt, tenant_id, similarity_threshold, exact_only=exact_only,
+    )
 
 
 async def delete_semantic_cache(prompt: str, tenant_id: str = "default") -> None:

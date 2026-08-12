@@ -16,6 +16,9 @@ class GlobalState(TypedDict, total=False):
     tenant_id: str
     session_id: str
     user_id: str
+    resolved_prompt: str
+    cache_prompt: str
+    conversation_context: dict[str, Any]
 
     # ── Set by supervisor_node ────────────────────────────────────────────
     supervisor_plan: dict[str, Any]
@@ -50,6 +53,7 @@ class SQLSubgraphState(TypedDict, total=False):
     """
     tenant_id: str
     prompt: str
+    resolved_prompt: str
     error_message: str      # Passed to SQL gen on retry so it can self-correct
     prisma_context: str     # Formatted DDL from retrieved_schemas
     generated_sql: str

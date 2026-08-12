@@ -20,6 +20,7 @@ import httpx
 from agent.state import GlobalState
 from app.config import get_settings
 from services.session_memory import get_session_history, append_session_event
+from services.conversation_context import format_context_for_model
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -119,8 +120,15 @@ async def chat_node(state: GlobalState) -> GlobalState:
     system_msg = ""
 
     if intent == "contextual":
-        history = await get_session_history(session_id)
-        context = _build_context_from_history(history)
+        structured_context = state.get("conversation_context", {})
+        if structured_context.get("is_followup"):
+            context = format_context_for_model(structured_context)
+        else:
+            history = [
+                event for event in await get_session_history(session_id)
+                if event.get("tenant_id") == tenant_id
+            ]
+            context = _build_context_from_history(history)
 
         if any(kw in prompt_lower for kw in _SIMPLER_KEYWORDS):
             system_msg = (
@@ -187,6 +195,7 @@ async def chat_node(state: GlobalState) -> GlobalState:
         "phase": "chat",
         "intent": intent,
         "prompt": prompt,
+        "tenant_id": tenant_id,
         "summary": reply,
     })
 
