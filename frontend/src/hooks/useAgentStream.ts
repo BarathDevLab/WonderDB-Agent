@@ -9,8 +9,8 @@ function getInitialSessions(): ChatSession[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.filter(s => s.messages && s.messages.length > 0);
       }
     }
   } catch (e) {
@@ -23,8 +23,28 @@ export function useAgentStream(initialTenantId: string) {
   const [sessions, setSessions] = useState<ChatSession[]>(getInitialSessions);
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     const saved = getInitialSessions();
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const sessionParam = urlParams.get('session');
+      if (sessionParam && saved.some(s => s.id === sessionParam)) {
+        return sessionParam;
+      }
+    }
     return saved.length > 0 ? saved[0].id : '';
   });
+
+  // Sync to URL whenever activeSessionId changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (activeSessionId) {
+        url.searchParams.set('session', activeSessionId);
+      } else {
+        url.searchParams.delete('session');
+      }
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [activeSessionId]);
   const [currentMessage, setCurrentMessage] = useState<ChatMessage | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -42,20 +62,11 @@ export function useAgentStream(initialTenantId: string) {
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
   const messages = activeSession ? activeSession.messages : [];
 
-  const createNewSession = useCallback((tenantId: string = initialTenantId) => {
-    const newSession: ChatSession = {
-      id: `session-${Date.now()}`,
-      title: 'New Database Query',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      tenant_id: tenantId,
-      messages: [],
-    };
-    setSessions((prev) => [newSession, ...prev]);
-    setActiveSessionId(newSession.id);
+  const createNewSession = useCallback(() => {
+    setActiveSessionId('');
     setCurrentMessage(null);
-    return newSession.id;
-  }, [initialTenantId]);
+    return '';
+  }, []);
 
   const switchSession = useCallback((sessionId: string) => {
     if (isStreaming) return;

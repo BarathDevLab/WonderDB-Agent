@@ -15,6 +15,8 @@ import {
   ChevronRight,
   Server,
   AlertCircle,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { ChatSession, Tenant } from '../types';
 
@@ -68,8 +70,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isBackendHealthy, setIsBackendHealthy] = useState<boolean | null>(null);
   const [cacheFlushed, setCacheFlushed] = useState(false);
   const [isTenantPopoverOpen, setIsTenantPopoverOpen] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isDatabaseInfoOpen, setIsDatabaseInfoOpen] = useState(false);
 
   const tenantPopoverRef = useRef<HTMLDivElement>(null);
+  const dbInfoRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dbInfoRef.current && !dbInfoRef.current.contains(e.target as Node)) {
+        setIsDatabaseInfoOpen(false);
+      }
+    };
+    if (isDatabaseInfoOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isDatabaseInfoOpen]);
+
+  useEffect(() => {
+    // Check initial preference from localStorage or body class
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'light' || document.documentElement.classList.contains('light-theme')) {
+      setIsDarkMode(false);
+      document.documentElement.classList.add('light-theme');
+    } else {
+      setIsDarkMode(true);
+      document.documentElement.classList.remove('light-theme');
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('light-theme');
+      localStorage.setItem('theme', 'light');
+      setIsDarkMode(false);
+    } else {
+      document.documentElement.classList.remove('light-theme');
+      localStorage.setItem('theme', 'dark');
+      setIsDarkMode(true);
+    }
+  };
 
   const checkHealth = async () => {
     try {
@@ -189,15 +230,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {/* 1. TOP HEADER */}
             <div className="flex items-center justify-between px-4 py-3.5 border-b border-zinc-800/80">
               <div className="flex items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200">
-                  <Database className="h-3.5 w-3.5" />
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg overflow-hidden">
+                  <img src="/logo.png" alt="WonderDB Logo" className="h-full w-full object-cover" />
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="font-semibold text-sm tracking-tight text-zinc-100">
-                    Postgres Copilot
+                    WonderDB Agent
                   </span>
                   <span className="rounded bg-zinc-800 border border-zinc-700 px-1 py-0.2 text-[9px] font-mono text-zinc-400">
-                    v2.4
+                    v1.0
                   </span>
                 </div>
               </div>
@@ -216,45 +257,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 onClick={onNewSession}
                 disabled={isStreaming}
-                className="flex w-full items-center justify-between rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 p-2 text-xs font-semibold shadow-sm transition-all active:scale-[0.99] disabled:opacity-50"
+                className="flex w-full items-center justify-between rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-400 p-2 text-xs font-semibold shadow-sm transition-all active:scale-[0.99] disabled:opacity-50"
               >
                 <div className="flex items-center gap-2">
                   <Plus className="h-3.5 w-3.5" />
                   <span>New Query</span>
                 </div>
-                <span className="text-[10px] font-mono text-zinc-600 border border-zinc-300/60 px-1 rounded bg-zinc-200/60">
+                <span className="text-[10px] font-mono text-emerald-400/80 border border-emerald-500/20 px-1 rounded bg-emerald-500/10">
                   ⌘N
                 </span>
               </button>
             </div>
 
-            {/* 3. TENANT ISOLATION (RLS) */}
-            <div className="px-3 pt-3 pb-2">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2.5">
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-medium">
-                    <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />
-                    <span>Tenant Scope (RLS)</span>
-                  </div>
-                  <span className="text-[9px] font-mono px-1 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
-                    Enforced
-                  </span>
-                </div>
 
-                <select
-                  value={selectedTenant}
-                  onChange={(e) => onSelectTenant(e.target.value)}
-                  disabled={isStreaming}
-                  className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs font-medium text-zinc-200 focus:border-zinc-500 focus:outline-none cursor-pointer"
-                >
-                  {PRESET_TENANTS.map((tenant) => (
-                    <option key={tenant.id} value={tenant.id} className="bg-zinc-900 text-zinc-200">
-                      {tenant.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
 
             {/* Search History Filter */}
             {sessions.length > 3 && (
@@ -367,33 +382,53 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* 5. FOOTER UTILITY BAR */}
             <div className="p-3 border-t border-zinc-800/80 space-y-2 bg-[#0a0b0e]">
-              <button
-                onClick={onOpenSchema}
-                className="flex w-full items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <Layers className="h-3.5 w-3.5 text-zinc-400" />
-                  <span>Schema Catalog</span>
-                </div>
-                <span className="rounded bg-zinc-800 border border-zinc-700 px-1.5 py-0.2 text-[10px] font-mono text-zinc-400">
-                  5 tables
-                </span>
-              </button>
+              <div className="relative" ref={isOpen ? dbInfoRef : null}>
+                <button
+                  onClick={() => setIsDatabaseInfoOpen(!isDatabaseInfoOpen)}
+                  className="flex w-full items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Database className="h-3.5 w-3.5 text-zinc-400" />
+                    <span>Database Info</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {isBackendHealthy ? (
+                      <span className="h-2 w-2 rounded-full bg-emerald-500" title="Online" />
+                    ) : isBackendHealthy === false ? (
+                      <span className="h-2 w-2 rounded-full bg-rose-500" title="Offline" />
+                    ) : null}
+                  </div>
+                </button>
 
-              <button
-                onClick={handleFlushCache}
-                className="flex w-full items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <RotateCcw className={`h-3.5 w-3.5 text-zinc-400 ${cacheFlushed ? 'animate-spin' : ''}`} />
-                  <span>Semantic Cache</span>
-                </div>
-                <span className="text-[10px] font-mono text-zinc-500">
-                  {cacheFlushed ? 'Flushed' : 'Flush'}
-                </span>
-              </button>
+                {isDatabaseInfoOpen && (
+                  <div className="absolute bottom-full left-0 mb-2 w-full rounded-xl border border-zinc-800 bg-[#0d0e12] p-2 shadow-xl z-50">
+                    <button
+                      onClick={() => { onOpenSchema(); setIsDatabaseInfoOpen(false); }}
+                      className="flex w-full items-center justify-between rounded-lg hover:bg-zinc-800/50 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Layers className="h-3.5 w-3.5 text-zinc-400" />
+                        <span>Schema Catalog</span>
+                      </div>
+                      <span className="rounded bg-zinc-800 border border-zinc-700 px-1.5 py-0.2 text-[10px] font-mono text-zinc-400">
+                        5 tables
+                      </span>
+                    </button>
+                    
+                    <button
+                      onClick={() => { handleFlushCache(); setIsDatabaseInfoOpen(false); }}
+                      className="flex w-full items-center justify-between rounded-lg hover:bg-zinc-800/50 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors mt-1"
+                    >
+                      <div className="flex items-center gap-2">
+                        <RotateCcw className={`h-3.5 w-3.5 text-zinc-400 ${cacheFlushed ? 'animate-spin' : ''}`} />
+                        <span>Semantic Cache</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-zinc-500">
+                        {cacheFlushed ? 'Flushed' : 'Flush'}
+                      </span>
+                    </button>
 
-              {/* Engine Status Card */}
+                      {/* Engine Status Card */}
               <div
                 onClick={checkHealth}
                 className="flex items-center justify-between rounded-lg bg-zinc-900/60 border border-zinc-800 px-3 py-2 text-xs cursor-pointer hover:bg-zinc-800 transition-colors"
@@ -401,7 +436,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <div className="flex items-center gap-2">
                   <Server className="h-3.5 w-3.5 text-zinc-400" />
-                  <span className="text-[11px] text-zinc-300 font-medium">PostgreSQL Engine</span>
+                  <span className="text-[11px] text-zinc-300 font-medium">Database Engine</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   {isBackendHealthy ? (
@@ -419,6 +454,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   )}
                 </div>
               </div>
+
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={toggleTheme}
+                className="flex w-full items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors"
+                title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                <div className="flex items-center gap-2">
+                  {isDarkMode ? <Sun className="h-3.5 w-3.5 text-zinc-400" /> : <Moon className="h-3.5 w-3.5 text-zinc-400" />}
+                  <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+                </div>
+              </button>
+
+            
             </div>
           </div>
         ) : (
@@ -431,78 +483,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {/* 1. Logo / Expand */}
               <button
                 onClick={onToggleOpen}
-                className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700 transition-colors"
+                className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors overflow-hidden p-0.5"
                 title="Expand sidebar"
               >
-                <Database className="h-4 w-4" />
+                <img src="/logo.png" alt="WonderDB Logo" className="h-full w-full object-contain rounded-md" />
               </button>
 
               {/* 2. New Query Button */}
               <button
                 onClick={onNewSession}
                 disabled={isStreaming}
-                className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 font-bold transition-all shadow-sm disabled:opacity-40"
+                className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-400 font-bold transition-all shadow-sm disabled:opacity-40"
                 title="New Query (⌘N)"
               >
                 <Plus className="h-4 w-4" />
               </button>
 
-              {/* 3. Tenant Isolation Button */}
-              <div className="relative" ref={tenantPopoverRef}>
-                <button
-                  onClick={() => setIsTenantPopoverOpen((prev) => !prev)}
-                  disabled={isStreaming}
-                  className={`flex h-9 w-9 items-center justify-center rounded-lg border transition-colors ${
-                    isTenantPopoverOpen
-                      ? 'bg-zinc-800 border-zinc-500 text-zinc-100'
-                      : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                  }`}
-                  title={`RLS Scope: ${activeTenantObj.name} (Click to switch tenant)`}
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                </button>
 
-                {/* Floating Tenant Popover */}
-                {isTenantPopoverOpen && (
-                  <div className="absolute left-12 top-0 z-50 w-64 rounded-xl border border-zinc-700 bg-zinc-900 p-2.5 shadow-2xl animate-fadeIn">
-                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-800">
-                      <div className="flex items-center gap-1.5 text-[10px] uppercase font-mono tracking-wider text-zinc-400 font-semibold">
-                        <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />
-                        <span>Tenant Scope (RLS)</span>
-                      </div>
-                      <span className="text-[9px] font-mono px-1 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
-                        Enforced
-                      </span>
-                    </div>
-
-                    <div className="space-y-1">
-                      {PRESET_TENANTS.map((tenant) => {
-                        const isSelected = tenant.id === selectedTenant;
-                        return (
-                          <button
-                            key={tenant.id}
-                            onClick={() => {
-                              onSelectTenant(tenant.id);
-                              setIsTenantPopoverOpen(false);
-                            }}
-                            className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs transition-colors text-left ${
-                              isSelected
-                                ? 'bg-zinc-800 text-white font-medium'
-                                : 'hover:bg-zinc-800/60 text-zinc-300'
-                            }`}
-                          >
-                            <div>
-                              <span className="block font-medium">{tenant.name}</span>
-                              <span className="text-[10px] text-zinc-500">{tenant.tier}</span>
-                            </div>
-                            {isSelected && <Check className="h-3.5 w-3.5 text-zinc-300 shrink-0" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
 
               {/* 4. Recent Chats Icon */}
               <button
@@ -520,38 +517,53 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             {/* BOTTOM SECTION */}
-            <div className="flex flex-col items-center gap-2.5 w-full pt-2 border-t border-zinc-800/80">
-              {/* 5. Schema Catalog */}
-              <button
-                onClick={onOpenSchema}
-                className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors"
-                title="Schema Catalog (5 tables)"
-              >
-                <Layers className="h-4 w-4" />
-              </button>
+            <div className="flex flex-col items-center gap-2.5 w-full pt-2 border-t border-zinc-800/80" ref={!isOpen ? dbInfoRef : null}>
+              {/* Database Info */}
+              <div className="relative w-full flex justify-center">
+                <button
+                  onClick={() => setIsDatabaseInfoOpen(!isDatabaseInfoOpen)}
+                  className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors"
+                  title="Database Info"
+                >
+                  <Database className="h-4 w-4" />
+                  {isBackendHealthy ? (
+                    <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-[#0d0e12]" />
+                  ) : isBackendHealthy === false ? (
+                    <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2 rounded-full bg-rose-500 ring-2 ring-[#0d0e12]" />
+                  ) : null}
+                </button>
 
-              {/* 6. Semantic Cache Flush */}
-              <button
-                onClick={handleFlushCache}
-                className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors"
-                title="Flush Semantic Cache"
-              >
-                <RotateCcw className={`h-4 w-4 ${cacheFlushed ? 'animate-spin' : ''}`} />
-              </button>
+                {isDatabaseInfoOpen && (
+                  <div className="absolute bottom-2 left-14 w-64 rounded-xl border border-zinc-800 bg-[#0d0e12] p-2 shadow-xl z-50">
+                    <button
+                      onClick={() => { onOpenSchema(); setIsDatabaseInfoOpen(false); }}
+                      className="flex w-full items-center justify-between rounded-lg hover:bg-zinc-800/50 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Layers className="h-3.5 w-3.5 text-zinc-400" />
+                        <span>Schema Catalog</span>
+                      </div>
+                      <span className="rounded bg-zinc-800 border border-zinc-700 px-1.5 py-0.2 text-[10px] font-mono text-zinc-400">
+                        5 tables
+                      </span>
+                    </button>
+                    
+                    <button
+                      onClick={() => { handleFlushCache(); setIsDatabaseInfoOpen(false); }}
+                      className="flex w-full items-center justify-between rounded-lg hover:bg-zinc-800/50 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors mt-1"
+                    >
+                      <div className="flex items-center gap-2">
+                        <RotateCcw className={`h-3.5 w-3.5 text-zinc-400 ${cacheFlushed ? 'animate-spin' : ''}`} />
+                        <span>Semantic Cache</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-zinc-500">
+                        {cacheFlushed ? 'Flushed' : 'Flush'}
+                      </span>
+                    </button>
 
-              {/* 7. Engine Status Indicator */}
-              <button
-                onClick={checkHealth}
-                className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 transition-colors"
-                title={`PostgreSQL Engine: ${isBackendHealthy ? 'Online' : isBackendHealthy === false ? 'Offline' : 'Checking...'}`}
-              >
-                <Server className="h-4 w-4" />
-                {isBackendHealthy ? (
-                  <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-[#0d0e12]" />
-                ) : isBackendHealthy === false ? (
-                  <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2 rounded-full bg-rose-500 ring-2 ring-[#0d0e12]" />
-                ) : null}
-              </button>
+                  </div>
+                )}
+              </div>
 
               {/* Mini expand toggle */}
               <button

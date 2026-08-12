@@ -42,31 +42,30 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({ spec }) => {
 
   const chartType = spec.type || 'bar';
 
-  // Professional Enterprise Theme Colors (Cobalt, Emerald, Amber, Slate)
+  // Professional Enterprise Theme Colors (Emerald, Cobalt, Amber, Slate)
   const enhancedData = {
     ...spec.data,
     datasets: (spec.data.datasets || []).map((ds, idx) => {
       const isLine = chartType === 'line';
       const colors = [
-        { border: '#3b82f6', bg: isLine ? 'rgba(59, 130, 246, 0.12)' : '#3b82f6' },
-        { border: '#10b981', bg: isLine ? 'rgba(16, 185, 129, 0.12)' : '#10b981' },
-        { border: '#f59e0b', bg: isLine ? 'rgba(245, 158, 11, 0.12)' : '#f59e0b' },
+        { border: '#10b981', bg: isLine ? 'rgba(16, 185, 129, 0.2)' : '#10b981' }, // Emerald (Primary)
+        { border: '#3b82f6', bg: isLine ? 'rgba(59, 130, 246, 0.2)' : '#3b82f6' }, // Blue
+        { border: '#f59e0b', bg: isLine ? 'rgba(245, 158, 11, 0.2)' : '#f59e0b' }, // Amber
       ];
       const theme = colors[idx % colors.length];
 
       return {
         ...ds,
-        borderColor: ds.borderColor || theme.border,
+        borderColor: theme.border, // Force theme colors over backend defaults for a cohesive UI
         backgroundColor:
-          ds.backgroundColor ||
-          (chartType === 'doughnut' || chartType === 'pie'
-            ? ['#3b82f6', '#10b981', '#f59e0b', '#6366f1', '#ec4899']
-            : theme.bg),
-        borderWidth: ds.borderWidth || (isLine ? 2 : 0),
+          chartType === 'doughnut' || chartType === 'pie'
+            ? ['#10b981', '#3b82f6', '#f59e0b', '#6366f1', '#ec4899']
+            : theme.bg,
+        borderWidth: isLine ? 2 : 0,
         borderRadius: chartType === 'bar' ? 4 : 0,
-        tension: 0.3,
+        tension: 0.4, // Smoother curves
         fill: isLine,
-        pointBackgroundColor: '#3b82f6',
+        pointBackgroundColor: theme.border,
         pointBorderColor: '#18181b',
         pointRadius: 3,
         pointHoverRadius: 5,
@@ -87,11 +86,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({ spec }) => {
         },
       },
       title: {
-        display: !!spec.options?.plugins?.title?.text,
-        text: spec.options?.plugins?.title?.text || '',
-        color: '#f4f4f5',
-        font: { family: 'Space Grotesk', size: 13, weight: '600' },
-        padding: { bottom: 12 },
+        display: false, // We have a custom HTML header, so hide the canvas title
       },
       tooltip: {
         backgroundColor: '#18181b',
@@ -109,7 +104,21 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({ spec }) => {
         : {
             x: {
               grid: { color: 'rgba(255, 255, 255, 0.04)' },
-              ticks: { color: '#71717a', font: { family: 'JetBrains Mono', size: 10 } },
+              ticks: { 
+                color: '#71717a', 
+                font: { family: 'JetBrains Mono', size: 10 },
+                maxRotation: 45,
+                callback: function(this: any, value: any) {
+                  const label = this.getLabelForValue(value);
+                  if (typeof label === 'string' && label.match(/^\d{4}-\d{2}-\d{2}/)) {
+                    const date = new Date(label);
+                    if (!isNaN(date.getTime())) {
+                      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+                    }
+                  }
+                  return label;
+                }
+              },
             },
             y: {
               grid: { color: 'rgba(255, 255, 255, 0.04)' },

@@ -13,6 +13,7 @@ import { useAgentStream } from './hooks/useAgentStream';
 import ReactMarkdown from 'react-markdown';
 import {
   Database,
+  Sparkles,
   User,
   ShieldCheck,
   Server,
@@ -113,7 +114,7 @@ export const App: React.FC = () => {
         sessions={sessions}
         activeSessionId={activeSessionId}
         onSelectSession={switchSession}
-        onNewSession={() => createNewSession(selectedTenant)}
+        onNewSession={() => createNewSession()}
         onDeleteSession={deleteSession}
         onRenameSession={renameSession}
         selectedTenant={selectedTenant}
@@ -151,95 +152,19 @@ export const App: React.FC = () => {
           <div className="mx-auto max-w-3xl space-y-5">
             {/* Welcome Screen when Session is Empty */}
             {messages.length === 0 && !currentMessage && (
-              <div className="my-6 rounded-2xl border border-zinc-800/50 bg-[#1e1f20] p-6 sm:p-8 shadow-lg animate-fadeIn">
-                <div className="flex flex-col items-center text-center">
-                  <div className="mb-3.5 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200">
-                    <Database className="h-5 w-5" />
-                  </div>
-                  <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-100 mb-1.5">
-                    PostgreSQL AI Database Copilot
-                  </h2>
-                  <p className="max-w-lg text-xs sm:text-sm text-zinc-400 leading-relaxed mb-6">
-                    Query relational schemas in natural language with pgvector semantic catalog matching, AST safety gates, and multi-tenant RLS isolation.
-                  </p>
-
-                  {/* Architecture Feature Cards */}
-                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 w-full text-left mb-6">
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3.5 hover:border-zinc-700 transition-colors">
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-200 mb-1">
-                        <Server className="h-3.5 w-3.5 text-zinc-400" />
-                        <span>pgvector RAG</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-400 leading-relaxed">
-                        1536-d dense embeddings match schema tables, columns, and foreign key relations.
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3.5 hover:border-zinc-700 transition-colors">
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-200 mb-1">
-                        <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />
-                        <span>AST & Cost Gate</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-400 leading-relaxed">
-                        sqlglot static analysis guards against DDL/DML, while EXPLAIN validates query plan cost.
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3.5 hover:border-zinc-700 transition-colors">
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-200 mb-1">
-                        <BarChart3 className="h-3.5 w-3.5 text-zinc-400" />
-                        <span>PII & Visuals</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-400 leading-relaxed">
-                        Automated PII data masking with interactive Chart.js visualization generation.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Quick Starter Prompts */}
-                  <div className="w-full text-left">
-                    <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-500 font-semibold mb-2 block">
-                      Starter Questions:
-                    </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[
-                        {
-                          icon: TrendingUp,
-                          title: 'Monthly Revenue',
-                          prompt: 'Show me total revenue and monthly sales performance',
-                        },
-                        {
-                          icon: User,
-                          title: 'Top Customers',
-                          prompt:
-                            'Who are our top customers by total spent and what is their contact info?',
-                        },
-                        {
-                          icon: FileSpreadsheet,
-                          title: 'Product Catalog',
-                          prompt: 'List available products and their pricing categories',
-                        },
-                        {
-                          icon: Database,
-                          title: 'Order Statuses',
-                          prompt: 'Calculate total order count grouped by order status',
-                        },
-                      ].map((item) => (
-                        <button
-                          key={item.title}
-                          onClick={() => sendPrompt(item.prompt, selectedTenant)}
-                          className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800 hover:border-zinc-700 p-3 text-xs text-zinc-300 hover:text-zinc-100 transition-colors text-left group"
-                        >
-                          <div className="flex items-center gap-2 truncate pr-2">
-                            <item.icon className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
-                            <span className="truncate">{item.prompt}</span>
-                          </div>
-                          <ArrowUpRight className="h-3.5 w-3.5 text-zinc-500 group-hover:text-zinc-300 shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              <div className="flex flex-col items-center justify-center min-h-[60vh] w-full max-w-3xl mx-auto animate-fadeIn">
+                <div className="flex items-center gap-3 mb-8">
+                  <img src="/logo.png" alt="WonderDB Logo" className="h-10 w-10 object-contain" />
+                  <h1 className="text-4xl font-serif text-zinc-100 tracking-tight">
+                    WonderDB Agent
+                  </h1>
                 </div>
+                <ChatInput 
+                  onSend={(prompt) => sendPrompt(prompt, selectedTenant)} 
+                  onCancel={cancelStream}
+                  isStreaming={isStreaming} 
+                  className="bg-transparent"
+                />
               </div>
             )}
 
@@ -264,17 +189,9 @@ export const App: React.FC = () => {
                 ) : (
                   /* Assistant Message: Ordered exactly as Thinking -> Summary -> Table -> Chart */
                   <div className="flex items-start gap-4">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 shrink-0 mt-1">
-                      <Terminal className="h-4 w-4" />
-                    </div>
                     <div className="flex-1 overflow-hidden space-y-4">
                       {/* 1. Sleek Claude Thinking bar */}
                       <ThoughtTracker message={msg} />
-
-                      {/* Tool Calls Badge */}
-                      {msg.toolCalls && msg.toolCalls.length > 0 && (
-                        <ToolCallBadge calls={msg.toolCalls} />
-                      )}
 
                       {/* 3. Mermaid Diagrams (ER / Process / Decision) — shown BEFORE AI Insight */}
                       {msg.diagramSpec && msg.diagramSpec.length > 0 && (
@@ -331,17 +248,9 @@ export const App: React.FC = () => {
             {currentMessage && (
               <div className="space-y-3 animate-fadeIn">
                 <div className="flex items-start gap-4">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 shrink-0 mt-1">
-                    <Terminal className="h-4 w-4 animate-pulse" />
-                  </div>
                   <div className="flex-1 overflow-hidden space-y-4">
                     {/* 1. Sleek Claude Thinking bar */}
                     <ThoughtTracker message={currentMessage} />
-
-                    {/* Tool Calls Badge */}
-                    {currentMessage.toolCalls && currentMessage.toolCalls.length > 0 && (
-                      <ToolCallBadge calls={currentMessage.toolCalls} />
-                    )}
 
                     {/* 2. Mermaid Diagrams — shown first so AI Insight explains them */}
                     {currentMessage.diagramSpec && currentMessage.diagramSpec.length > 0 && (
@@ -383,11 +292,14 @@ export const App: React.FC = () => {
         </main>
 
         {/* Input Bar */}
-        <ChatInput
-          onSend={(prompt) => sendPrompt(prompt, selectedTenant)}
-          onCancel={cancelStream}
-          isStreaming={isStreaming}
-        />
+        {(messages.length > 0 || currentMessage) && (
+          <ChatInput
+            onSend={(prompt) => sendPrompt(prompt, selectedTenant)}
+            onCancel={cancelStream}
+            isStreaming={isStreaming}
+            className="sticky bottom-0 z-20 bg-[#131314] pt-2 pb-6 px-3 sm:px-6"
+          />
+        )}
       </div>
     </div>
   );

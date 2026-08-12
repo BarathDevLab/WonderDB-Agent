@@ -85,7 +85,7 @@ class NewSpinner extends HTMLElement {
 
     // Sprite sheet image asset
     this.sprite = new Image();
-    this.sprite.src = 'new_spritesheet.png';
+    this.sprite.src = '/new_spritesheet.png';
     this.sprite.onload = () => {
       this.renderFrame(this.currentFrame);
     };

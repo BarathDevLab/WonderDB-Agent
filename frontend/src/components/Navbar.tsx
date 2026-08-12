@@ -28,7 +28,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   isStreaming,
 }) => {
   return (
-    <header className="sticky top-0 z-30 flex h-13 w-full items-center justify-between border-b border-zinc-800/80 bg-[#090a0d]/90 backdrop-blur-md px-4 sm:px-6">
+    <header className="sticky top-0 z-30 flex h-14 w-full items-center justify-between border-b border-zinc-800/80 bg-[#090a0d]/90 backdrop-blur-md px-4 sm:px-6">
       {/* Left side */}
       <div className="flex items-center gap-3">
         <button
@@ -40,11 +40,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-xs text-zinc-100 tracking-tight">
-            Postgres Copilot
-          </span>
-          <span className="text-zinc-600 font-mono">/</span>
-          <span className="text-xs text-zinc-400 truncate max-w-[200px] sm:max-w-[360px]">
+          <Database className="h-4 w-4 text-emerald-500" />
+          <span className="text-sm font-medium text-zinc-200 truncate max-w-[200px] sm:max-w-[360px]">
             {sessionTitle || 'New Query'}
           </span>
         </div>

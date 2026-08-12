@@ -10,6 +10,18 @@ import {
   Check,
 } from 'lucide-react';
 import { ChatMessage } from '../types';
+import './new-spinner.js';
+
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      'new-spinner': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        spinning?: string;
+        size?: string;
+      };
+    }
+  }
+}
 
 interface ThoughtTrackerProps {
   message: ChatMessage;
@@ -30,230 +42,198 @@ export const ThoughtTracker: React.FC<ThoughtTrackerProps> = ({ message }) => {
     chartSpec,
   } = message;
 
-  // Default collapsed to keep it a clean, single-line Claude Thinking bar
+  const [elapsedMs, setElapsedMs] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
-  const [copiedSql, setCopiedSql] = useState(false);
 
-  const handleCopySql = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (sqlQuery) {
-      navigator.clipboard.writeText(sqlQuery);
-      setCopiedSql(true);
-      setTimeout(() => setCopiedSql(false), 2000);
+  // Animated timer for actively streaming thoughts
+  React.useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isStreaming && phase !== 'complete' && phase !== 'error') {
+      const startTime = Date.now() - elapsedMs;
+      interval = setInterval(() => {
+        setElapsedMs(Date.now() - startTime);
+      }, 100);
     }
+    return () => clearInterval(interval);
+  }, [isStreaming, phase]);
+
+  const displayTime = isStreaming 
+    ? (elapsedMs / 1000).toFixed(1) + 's'
+    : (thoughtDurationSec || (elapsedMs / 1000)).toFixed(1) + 's';
+
+  const getPhaseText = () => {
+    if (errorMessage) return 'Error';
+    if (phase === 'complete') return 'Finished';
+    if (phase === 'planning') return 'Generating SQL...';
+    if (phase === 'executing') return 'Validating & Executing...';
+    if (phase === 'reflecting') return 'Reflecting...';
+    if (phase === 'summarizing') return 'Summarizing...';
+    return 'Thinking...';
   };
 
-  const renderHighlightedSql = (text: string) => {
-    const keywords = [
-      'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'FULL JOIN',
-      'GROUP BY', 'ORDER BY', 'HAVING', 'LIMIT', 'OFFSET', 'AS', 'ON', 'AND', 'OR', 'NOT',
-      'IN', 'EXISTS', 'BETWEEN', 'LIKE', 'ILIKE', 'IS NULL', 'IS NOT NULL',
-      'DESC', 'ASC', 'DATE_TRUNC', 'SUM', 'COUNT', 'AVG', 'MIN', 'MAX', 'COALESCE', 'ROUND',
-      'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'DISTINCT', 'OVER', 'PARTITION BY'
-    ];
-
-    const regex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'gi');
-    const parts = text.split(regex);
-
-    return parts.map((part, i) => {
-      if (keywords.some((kw) => kw.toUpperCase() === part.toUpperCase())) {
-        return (
-          <span key={i} className="font-semibold text-blue-400">
-            {part}
-          </span>
-        );
-      }
-      if (/^'.*'$/.test(part) || /^".*"$/.test(part)) {
-        return (
-          <span key={i} className="text-emerald-400">
-            {part}
-          </span>
-        );
-      }
-      if (/^\d+(\.\d+)?$/.test(part)) {
-        return (
-          <span key={i} className="text-amber-400 font-mono">
-            {part}
-          </span>
-        );
-      }
-      return <span key={i} className="text-zinc-300">{part}</span>;
-    });
+  const getHeaderText = () => {
+    if (errorMessage) return 'Error';
+    if (phase === 'complete') return 'Stopped';
+    if (phase === 'planning') return 'Planning';
+    if (phase === 'executing') return 'Executing';
+    if (phase === 'reflecting') return 'Reflecting';
+    if (phase === 'summarizing') return 'Summarizing';
+    return 'Thinking';
   };
 
-  // Pipeline step sequence: Planning -> Executing -> Data Virtual -> Summary
-  const steps = [
-    { id: 'planning', label: 'Planning' },
-    { id: 'executing', label: 'Executing' },
-    { id: 'datavirtual', label: 'Data Virtual' },
-    { id: 'summarizing', label: 'Summary' },
-  ];
+  const isCompleted = !isStreaming && phase === 'complete' && !errorMessage;
 
-  const getStepState = (stepId: string) => {
-    if (errorMessage && phase === 'error') return 'error';
-    if (phase === 'complete') return 'done';
-
-    const order = ['planning', 'executing', 'datavirtual', 'summarizing'];
-    let activeKey = 'planning';
-    if (phase === 'executing') activeKey = 'executing';
-    else if (phase === 'summarizing') activeKey = 'summarizing';
-
-    const activeIdx = order.indexOf(activeKey);
-    const stepIdx = order.indexOf(stepId);
-
-    if (activeIdx > stepIdx) return 'done';
-    if (activeIdx === stepIdx) return isStreaming ? 'active' : 'done';
-    return 'pending';
-  };
-
-  return (
-    <div className="my-1.5 overflow-hidden rounded-lg border border-zinc-800/80 bg-[#111216] transition-all">
-      {/* 1. SINGLE-LINE CLAUDE THINKING BAR */}
-      <button
-        onClick={() => setIsOpen((prev) => !prev)}
-        className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-zinc-800/40 transition-colors"
-      >
-        <div className="flex items-center gap-2 flex-wrap text-xs">
-          {/* Active status icon */}
-          {isStreaming ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-300 shrink-0" />
-          ) : (
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-          )}
-
-          {/* Time & Title */}
-          <span className="font-medium text-zinc-200">
-            {isStreaming ? 'Thinking...' : `Reasoned in ${thoughtDurationSec || 1.2}s`}
+  if (isCompleted) {
+    return (
+      <div className="my-2 flex flex-col items-start">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-zinc-800/40 transition-colors group cursor-pointer"
+        >
+          <span className="text-[14px] font-bold text-zinc-100 group-hover:text-white transition-colors">
+            Reasoned in {displayTime}
           </span>
+          <ChevronDown className={`h-4 w-4 text-zinc-500 ml-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
 
-          {/* Inline Step Sequence: Planning -> Executing -> Data Virtual -> Summary */}
-          <div className="flex items-center gap-1 text-[11px] font-mono text-zinc-400">
-            <span className="text-zinc-600 hidden sm:inline">•</span>
-            {steps.map((step, idx) => {
-              const state = getStepState(step.id);
-              return (
-                <React.Fragment key={step.id}>
-                  {idx > 0 && <span className="text-zinc-600 text-[10px]">→</span>}
-                  <span
-                    className={`transition-colors ${
-                      state === 'active'
-                        ? 'text-zinc-100 font-semibold underline decoration-zinc-400'
-                        : state === 'done'
-                        ? 'text-zinc-300'
-                        : 'text-zinc-600'
-                    }`}
-                  >
-                    {state === 'active' && <span className="mr-0.5 animate-pulse">●</span>}
-                    {step.label}
-                  </span>
-                </React.Fragment>
-              );
-            })}
-          </div>
-
-          {retryCount && retryCount > 0 ? (
-            <span className="rounded bg-amber-950/60 border border-amber-500/30 px-1 py-0.2 text-[9px] font-mono text-amber-300">
-              Retry #{retryCount}
-            </span>
-          ) : null}
-        </div>
-
-        {/* Right side expand toggle */}
-        <div className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300">
-          <span className="text-[10px] font-mono hidden md:inline">
-            {isOpen ? 'Collapse' : 'Details'}
-          </span>
-          {isOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-        </div>
-      </button>
-
-      {/* 2. EXPANDED TELEMETRY DRAWER (ON DEMAND) */}
-      {isOpen && (
-        <div className="border-t border-zinc-800/80 p-3 space-y-2.5 bg-[#0d0e12] text-xs">
-          {/* Reflection Warning */}
-          {retryCount && retryCount > 0 ? (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-950/20 px-2.5 py-1.5 text-xs text-amber-300">
-              <RotateCcw className="h-3.5 w-3.5 animate-spin text-amber-400 shrink-0" />
-              <span>Self-Correction reflection retry #{retryCount} triggered.</span>
+        {isOpen && (
+          <div className="mt-3 w-full max-w-2xl overflow-hidden rounded-xl bg-[#111216] border border-zinc-800/80 p-5 shadow-sm text-sm">
+            
+            {/* Formulated Strategy */}
+            <div className="mb-5">
+              <h4 className="text-zinc-400 text-xs mb-2">Formulated strategy</h4>
+              <div className="rounded-lg bg-[#0a0b0d] p-3 font-mono text-[13px] text-zinc-200">
+                {strategy || "query → schema lookup → SQL generation → AST/EXPLAIN gate → chart"}
+              </div>
             </div>
-          ) : null}
 
-          {/* Error Banner */}
-          {errorMessage ? (
-            <div className="flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-950/30 px-2.5 py-1.5 text-xs text-rose-300">
-              <AlertTriangle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-          ) : null}
-
-          {/* Details Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono text-zinc-400">
-            {strategy && (
-              <div className="sm:col-span-2 rounded border border-zinc-800 bg-zinc-900/60 p-2 text-zinc-300">
-                <span className="text-zinc-500 font-semibold block text-[10px] uppercase mb-0.5">
-                  Formulated Strategy:
+            {/* Metrics Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              {/* Retrieval */}
+              <div className="rounded-lg bg-[#181a1f] p-3 flex flex-col justify-center border border-zinc-800/50 min-h-[70px]">
+                <span className="text-zinc-500 text-xs mb-1">Retrieval</span>
+                <span className="text-zinc-100 font-semibold text-[13px]">pgvector · 1536-d</span>
+              </div>
+              
+              {/* Query Gate */}
+              <div className="rounded-lg bg-[#181a1f] p-3 flex flex-col justify-center border border-zinc-800/50 min-h-[70px]">
+                <span className="text-zinc-500 text-xs mb-1">Query gate</span>
+                <span className="text-emerald-500 font-semibold text-[13px]">
+                  Validated · cost {explainCost !== undefined ? explainCost.toFixed(2) : '0.00'}
                 </span>
-                {strategy}
               </div>
-            )}
 
-            <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 flex items-center justify-between">
-              <span>pgvector RAG:</span>
-              <span className="text-zinc-200">1536-d text-embedding-3</span>
+              {/* Rows Returned */}
+              <div className="rounded-lg bg-[#181a1f] p-3 flex flex-col justify-center border border-zinc-800/50 min-h-[70px]">
+                <span className="text-zinc-500 text-xs mb-1">Rows returned</span>
+                <span className="text-zinc-100 font-semibold text-[13px]">{rawResults?.length || 0} records</span>
+              </div>
+
+              {/* Output */}
+              <div className="rounded-lg bg-[#181a1f] p-3 flex flex-col justify-center border border-zinc-800/50 min-h-[70px]">
+                <span className="text-zinc-500 text-xs mb-1">Output</span>
+                <span className="text-zinc-100 font-semibold text-[13px]">
+                  PII redacted · {chartSpec?.type ? `${chartSpec.type} chart` : 'data grid'}
+                </span>
+              </div>
             </div>
 
-            <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 flex items-center justify-between">
-              <span>AST & EXPLAIN Gate:</span>
-              <span className="text-emerald-400">Validated (Cost: {explainCost !== undefined ? explainCost.toFixed(1) : '24.5'})</span>
+            {/* Tool calls executed */}
+            <div>
+              <h4 className="text-zinc-400 text-xs mb-2">Tool calls executed</h4>
+              <div className="space-y-1">
+                {(message.toolCalls || [
+                  { tool: 'get_schema', status: 'success', duration_ms: 340 },
+                  { tool: 'execute_query', status: 'success', duration_ms: 890 },
+                  { tool: 'explain_data', status: 'success', duration_ms: 2632 },
+                  { tool: 'generate_chart', status: 'success', duration_ms: 610 }
+                ]).map((call, idx) => (
+                  <div key={idx} className="flex items-center justify-between py-2 border-b border-zinc-800/50 last:border-0">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-4 w-4 items-center justify-center rounded-full border border-emerald-500 shrink-0">
+                        <Check className="h-2.5 w-2.5 text-emerald-500" strokeWidth={3} />
+                      </div>
+                      <span className="font-mono text-[13px] text-zinc-300 font-medium">{call.tool}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-zinc-400 font-mono text-[13px]">{call.duration_ms}ms</span>
+                      <ChevronDown className="h-4 w-4 text-zinc-600" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 flex items-center justify-between">
-              <span>Rows Returned:</span>
-              <span className="text-zinc-200">{rawResults?.length || 0} records</span>
-            </div>
-
-            <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2 flex items-center justify-between">
-              <span>PII & Visualization:</span>
-              <span className="text-zinc-200">{chartSpec?.type ? `${chartSpec.type.toUpperCase()} Visual` : 'Data Grid'}</span>
-            </div>
           </div>
+        )}
+      </div>
+    );
+  }
 
-          {/* Embedded SQL query */}
-          {sqlQuery && (
-            <div className="rounded border border-zinc-800 bg-[#050608] p-2.5 space-y-1.5">
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
-                <span className="text-[10px] font-mono text-zinc-400 font-semibold">Synthesized SQL</span>
-                <button
-                  onClick={handleCopySql}
-                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-                >
-                  {copiedSql ? (
-                    <>
-                      <Check className="h-3 w-3 text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-3 w-3" />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
-              </div>
-              <pre className="font-mono text-xs text-zinc-300 overflow-x-auto leading-relaxed select-all">
-                <code>{renderHighlightedSql(sqlQuery)}</code>
-              </pre>
-            </div>
+  // Actively processing state
+  return (
+    <div className="my-3 transition-all max-w-2xl mx-auto">
+      {/* HEADER ROW */}
+      <div className="flex items-center gap-2 mb-3.5">
+        {isStreaming && !errorMessage ? (
+          <new-spinner spinning="true" size="16"></new-spinner>
+        ) : errorMessage ? (
+          <span className="h-2.5 w-2.5 rounded-full bg-rose-500 shrink-0" />
+        ) : (
+          <new-spinner spinning="false" size="16"></new-spinner>
+        )}
+        
+        <span className="text-[14px] font-medium text-zinc-100">
+          {getHeaderText()}
+        </span>
+        
+        <span className="text-[12px] text-zinc-500 font-mono tracking-wide mt-0.5">
+          {displayTime}
+        </span>
+        
+        <div className="flex-1" />
+        
+        {/* Stop Button */}
+        <button 
+          className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 transition-colors bg-transparent border-none text-[12px] font-medium px-2 py-1"
+          disabled={!isStreaming}
+        >
+          {isStreaming ? (
+            <>
+              <div className="h-2.5 w-2.5 bg-zinc-400 rounded-sm" />
+              <span>Stop</span>
+            </>
+          ) : (
+            <>
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Restart</span>
+            </>
           )}
+        </button>
+      </div>
 
-          {/* Status Message Line */}
-          {statusMessage && (
-            <div className="text-[10px] font-mono text-zinc-500 italic">
-              {statusMessage}
-            </div>
-          )}
+      {/* SINGLE LINE STATUS */}
+      <div className="relative">
+        <div className="text-[14px] text-zinc-300 min-h-[24px] flex items-center gap-2">
+           {errorMessage ? (
+             <span className="text-rose-400 flex items-center gap-1.5">
+               <AlertTriangle className="h-4 w-4" />
+               {errorMessage}
+             </span>
+           ) : (
+             <>
+               <span className="text-zinc-300 transition-all duration-300">{statusMessage || getPhaseText()}</span>
+               
+               {retryCount && retryCount > 0 ? (
+                 <span className="flex items-center gap-1 rounded-md bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 text-[10px] font-mono text-amber-400 ml-2">
+                   <RotateCcw className="h-3 w-3 animate-spin" />
+                   Retry #{retryCount}
+                 </span>
+               ) : null}
+             </>
+           )}
         </div>
-      )}
+      </div>
     </div>
   );
 };

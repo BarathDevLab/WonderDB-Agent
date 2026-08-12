@@ -84,3 +84,13 @@ body {
 .animate-fadeIn {
   animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* Light Theme Mode (Invert Trick) */
+html.light-theme {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+html.light-theme img,
+html.light-theme .no-invert {
+  filter: invert(1) hue-rotate(180deg);
+}

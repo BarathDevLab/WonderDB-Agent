@@ -5,6 +5,7 @@ interface ChatInputProps {
   onSend: (prompt: string) => void;
   onCancel: () => void;
   isStreaming: boolean;
+  className?: string;
 }
 
 export const PROMPT_SUGGESTIONS = [
@@ -18,6 +19,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   onCancel,
   isStreaming,
+  className = '',
 }) => {
   const [prompt, setPrompt] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -101,7 +103,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   return (
-    <div className="sticky bottom-0 z-20 w-full bg-[#131314] pt-2 pb-6 px-3 sm:px-6">
+    <div className={`sticky bottom-0 z-20 w-full bg-[#131314] pt-2 pb-6 px-3 sm:px-6 ${className}`}>
       <div className="mx-auto max-w-3xl space-y-3">
         {/* Input Box */}
         <form onSubmit={handleSubmit} className="relative">
@@ -146,7 +148,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 <button
                   type="submit"
                   disabled={!prompt.trim()}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-200 hover:bg-white text-zinc-900 transition-all ml-1 active:scale-95 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-400 transition-all ml-1 active:scale-95 disabled:border-transparent disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed"
                   title="Send message"
                 >
                   <ArrowUp className="h-4 w-4" />

@@ -1,0 +1,157 @@
+<style>
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+.spin{animation:spin 0.8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.tool-row{transition:opacity 0.25s ease;}
+</style>
+<h2 class="sr-only">Chatbot response panel showing the agent's reasoning pipeline, key metrics, and the tool calls it executed, with a replay control to watch the sequence animate.</h2>
+<div style="background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem 1.25rem;">
+  <div id="header" style="display:flex; align-items:center; gap:10px; cursor:pointer; flex-wrap:wrap;">
+    <i id="status-icon" class="ti ti-circle-check" style="font-size:18px; color:var(--text-success); flex-shrink:0;" aria-hidden="true"></i>
+    <span id="status-text" style="font-size:14px; font-weight:500; white-space:nowrap;">Reasoned in 1.8s</span>
+    <div id="chips" style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+      <span class="chip" style="display:flex; align-items:center; gap:4px; background:var(--surface-1); border-radius:999px; padding:3px 9px; font-size:12px; color:var(--text-secondary); white-space:nowrap;"><i class="ti ti-circle-check chip-icon" style="font-size:12px; color:var(--text-success);" aria-hidden="true"></i>Schema</span>
+      <i class="ti ti-arrow-right" style="font-size:12px; color:var(--text-muted);" aria-hidden="true"></i>
+      <span class="chip" style="display:flex; align-items:center; gap:4px; background:var(--surface-1); border-radius:999px; padding:3px 9px; font-size:12px; color:var(--text-secondary); white-space:nowrap;"><i class="ti ti-circle-check chip-icon" style="font-size:12px; color:var(--text-success);" aria-hidden="true"></i>Query</span>
+      <i class="ti ti-arrow-right" style="font-size:12px; color:var(--text-muted);" aria-hidden="true"></i>
+      <span class="chip" style="display:flex; align-items:center; gap:4px; background:var(--surface-1); border-radius:999px; padding:3px 9px; font-size:12px; color:var(--text-secondary); white-space:nowrap;"><i class="ti ti-circle-check chip-icon" style="font-size:12px; color:var(--text-success);" aria-hidden="true"></i>Validate</span>
+      <i class="ti ti-arrow-right" style="font-size:12px; color:var(--text-muted);" aria-hidden="true"></i>
+      <span class="chip" style="display:flex; align-items:center; gap:4px; background:var(--surface-1); border-radius:999px; padding:3px 9px; font-size:12px; color:var(--text-secondary); white-space:nowrap;"><i class="ti ti-circle-check chip-icon" style="font-size:12px; color:var(--text-success);" aria-hidden="true"></i>Visualize</span>
+    </div>
+    <div style="flex:1; min-width:8px;"></div>
+    <button id="replay-btn" style="border:none; background:transparent; color:var(--text-secondary); font-size:12px; display:flex; align-items:center; gap:4px; padding:4px 8px;" aria-label="Replay reasoning animation">
+      <i class="ti ti-refresh" style="font-size:14px;" aria-hidden="true"></i>Replay
+    </button>
+    <i id="toggle-icon" class="ti ti-chevron-up" style="font-size:16px; color:var(--text-muted);" aria-hidden="true"></i>
+  </div>
+
+  <div id="body" style="margin-top:14px;">
+    <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Formulated strategy</div>
+    <div style="font-family:var(--font-mono); font-size:13px; background:var(--surface-1); border-radius:8px; padding:8px 10px; color:var(--text-primary);">query &#8594; schema lookup &#8594; SQL generation &#8594; AST/EXPLAIN gate &#8594; chart</div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; margin-top:12px;">
+      <div style="background:var(--surface-1); border-radius:var(--radius); padding:0.75rem 1rem;">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Retrieval</div>
+        <div style="font-size:15px; font-weight:500;">pgvector &#183; 1536-d</div>
+      </div>
+      <div style="background:var(--surface-1); border-radius:var(--radius); padding:0.75rem 1rem;">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Query gate</div>
+        <div style="font-size:15px; font-weight:500; color:var(--text-success);">Validated &#183; cost 0.00</div>
+      </div>
+      <div style="background:var(--surface-1); border-radius:var(--radius); padding:0.75rem 1rem;">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Rows returned</div>
+        <div style="font-size:15px; font-weight:500;">7 records</div>
+      </div>
+      <div style="background:var(--surface-1); border-radius:var(--radius); padding:0.75rem 1rem;">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Output</div>
+        <div style="font-size:15px; font-weight:500;">PII redacted &#183; line chart</div>
+      </div>
+    </div>
+
+    <div style="font-size:12px; color:var(--text-muted); margin:16px 0 4px;">Tool calls executed</div>
+    <div id="tool-list">
+      <div class="tool-row" style="display:flex; align-items:center; gap:10px; padding:8px 4px; cursor:pointer;">
+        <i class="ti ti-circle-check" style="font-size:15px; color:var(--text-success); flex-shrink:0;" aria-hidden="true"></i>
+        <span style="font-family:var(--font-mono); font-size:13px;">get_schema</span>
+        <div style="flex:1;"></div>
+        <span style="font-size:12px; color:var(--text-muted);">340ms</span>
+        <i class="ti ti-chevron-down row-chevron" style="font-size:13px; color:var(--text-muted); transition:transform 0.2s ease;" aria-hidden="true"></i>
+      </div>
+      <div class="tool-detail" style="display:none; padding:4px 10px 10px 29px;">
+        <div style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); background:var(--surface-1); border-radius:8px; padding:8px 10px;">tables: transactions, accounts, merchants</div>
+      </div>
+
+      <div class="tool-row" style="display:flex; align-items:center; gap:10px; padding:8px 4px; border-top:0.5px solid var(--border); cursor:pointer;">
+        <i class="ti ti-circle-check" style="font-size:15px; color:var(--text-success); flex-shrink:0;" aria-hidden="true"></i>
+        <span style="font-family:var(--font-mono); font-size:13px;">execute_query</span>
+        <div style="flex:1;"></div>
+        <span style="font-size:12px; color:var(--text-muted);">890ms</span>
+        <i class="ti ti-chevron-down row-chevron" style="font-size:13px; color:var(--text-muted); transition:transform 0.2s ease;" aria-hidden="true"></i>
+      </div>
+      <div class="tool-detail" style="display:none; padding:4px 10px 10px 29px;">
+        <div style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); background:var(--surface-1); border-radius:8px; padding:8px 10px;">SELECT merchant, sum(amount) &#8230; LIMIT 7</div>
+      </div>
+
+      <div class="tool-row" style="display:flex; align-items:center; gap:10px; padding:8px 4px; border-top:0.5px solid var(--border); cursor:pointer;">
+        <i class="ti ti-circle-check" style="font-size:15px; color:var(--text-success); flex-shrink:0;" aria-hidden="true"></i>
+        <span style="font-family:var(--font-mono); font-size:13px;">explain_data</span>
+        <div style="flex:1;"></div>
+        <span style="font-size:12px; color:var(--text-muted);">2632ms</span>
+        <i class="ti ti-chevron-down row-chevron" style="font-size:13px; color:var(--text-muted); transition:transform 0.2s ease;" aria-hidden="true"></i>
+      </div>
+      <div class="tool-detail" style="display:none; padding:4px 10px 10px 29px;">
+        <div style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); background:var(--surface-1); border-radius:8px; padding:8px 10px;">cost=0.00 rows=7 plan=Index Scan</div>
+      </div>
+
+      <div class="tool-row" style="display:flex; align-items:center; gap:10px; padding:8px 4px; border-top:0.5px solid var(--border); cursor:pointer;">
+        <i class="ti ti-circle-check" style="font-size:15px; color:var(--text-success); flex-shrink:0;" aria-hidden="true"></i>
+        <span style="font-family:var(--font-mono); font-size:13px;">generate_chart</span>
+        <div style="flex:1;"></div>
+        <span style="font-size:12px; color:var(--text-muted);">610ms</span>
+        <i class="ti ti-chevron-down row-chevron" style="font-size:13px; color:var(--text-muted); transition:transform 0.2s ease;" aria-hidden="true"></i>
+      </div>
+      <div class="tool-detail" style="display:none; padding:4px 10px 10px 29px;">
+        <div style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); background:var(--surface-1); border-radius:8px; padding:8px 10px;">line chart &#183; x: date, y: amount</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var header = document.getElementById('header');
+  var body = document.getElementById('body');
+  var toggleIcon = document.getElementById('toggle-icon');
+  var replayBtn = document.getElementById('replay-btn');
+  var statusIcon = document.getElementById('status-icon');
+  var statusText = document.getElementById('status-text');
+  var chipIcons = document.querySelectorAll('.chip-icon');
+  var toolRows = document.querySelectorAll('.tool-row');
+
+  header.addEventListener('click', function(e){
+    if (e.target.closest('#replay-btn')) return;
+    var open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    toggleIcon.className = open ? 'ti ti-chevron-down' : 'ti ti-chevron-up';
+  });
+
+  toolRows.forEach(function(row){
+    row.addEventListener('click', function(){
+      var detail = row.nextElementSibling;
+      var chev = row.querySelector('.row-chevron');
+      var open = detail.style.display !== 'none';
+      detail.style.display = open ? 'none' : 'block';
+      chev.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
+    });
+  });
+
+  replayBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    body.style.display = 'block';
+    toggleIcon.className = 'ti ti-chevron-up';
+    statusIcon.className = 'ti ti-loader-2 spin';
+    statusIcon.style.color = 'var(--text-secondary)';
+    statusText.textContent = 'Reasoning\u2026';
+    chipIcons.forEach(function(ic){ ic.className = 'ti ti-circle-dashed chip-icon'; ic.style.color = 'var(--text-muted)'; });
+    toolRows.forEach(function(row){ row.style.opacity = '0.25'; });
+
+    chipIcons.forEach(function(ic, i){
+      setTimeout(function(){
+        ic.className = 'ti ti-circle-check chip-icon';
+        ic.style.color = 'var(--text-success)';
+      }, 300 * (i + 1));
+    });
+
+    setTimeout(function(){
+      statusIcon.className = 'ti ti-circle-check';
+      statusIcon.style.color = 'var(--text-success)';
+      statusText.textContent = 'Reasoned in 1.8s';
+    }, 300 * chipIcons.length + 200);
+
+    toolRows.forEach(function(row, i){
+      setTimeout(function(){
+        row.style.opacity = '1';
+      }, 300 * chipIcons.length + 500 + i * 200);
+    });
+  });
+})();
+</script>
