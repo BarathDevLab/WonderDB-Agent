@@ -19,6 +19,7 @@ from db.postgres import get_shared_pool
 from services.schema_rag import retrieve_schema_context
 from services.semantic_cache import get_semantic_cache
 from services.session_memory import append_session_event
+from services.request_requirements import requested_visualizations_from_prompt
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -54,9 +55,10 @@ Visualizations: Select chart types that best fit the data shape:
   • Comparison across groups   → "bar_chart"
   • Part-of-whole distribution → "pie_chart"
   • Two numeric dimensions     → "scatter_chart"
-  • Complex transitions        → "process_flow"
-  • Hierarchical splits        → "decision_tree"
+  • Explicit process/workflow request → "process_flow"
+  • Explicit decision-tree request → "decision_tree"
   Only include a chart type if it genuinely adds insight.
+  Never infer process or decision diagrams from ordinary time-series/category rows.
   Empty list [] is valid when the data is best shown as a table.
 needs_explanation: true
 
@@ -108,7 +110,7 @@ OUTPUT RULES
   ["bar_chart", "line_chart", "pie_chart", "scatter_chart",
    "er_diagram", "process_flow", "decision_tree"]
 - Never include duplicate visualization types.
-- Maximum 3 visualization types per response.
+- Include every visualization explicitly requested by the user.
 - Always set needs_explanation=true for query and schema intents.
 """
 
@@ -177,9 +179,9 @@ async def _classify_intent(
             }
             plan["intent"] = plan.get("intent", "query") if plan.get("intent") in allowed_intents else "query"
             raw_viz = plan.get("visualizations", [])
-            plan["visualizations"] = list(dict.fromkeys(
-                v for v in raw_viz if v in allowed_viz
-            ))[:3]  # deduplicate, cap at 3
+            planned_viz = [v for v in raw_viz if v in allowed_viz]
+            explicit_viz = requested_visualizations_from_prompt(prompt)
+            plan["visualizations"] = list(dict.fromkeys(planned_viz + explicit_viz))
             plan["needs_explanation"] = bool(plan.get("needs_explanation", True))
 
             return plan
@@ -238,8 +240,10 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
             })
             # Reconstruct visualizations list from cached chart/diagram specs
             viz: list[dict] = []
-            if cached.get("chart_spec"):
-                viz.append(cached["chart_spec"])
+            cached_charts = cached.get("chart_specs") or (
+                [cached["chart_spec"]] if cached.get("chart_spec") else []
+            )
+            viz.extend(cached_charts)
             for d in cached.get("diagram_spec", []):
                 viz.append(d)
 
@@ -247,6 +251,8 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
                 "cached_hit": True,
                 "sql_query": cached.get("sql_query", ""),
                 "clean_dataset": cached.get("raw_results", []),
+                "data_analysis": cached.get("data_analysis", {}),
+                "response_verification": cached.get("response_verification", {}),
                 "summary": cached.get("summary", ""),
                 "visualizations": viz,
                 "has_fatal_error": False,

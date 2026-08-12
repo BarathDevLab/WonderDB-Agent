@@ -109,6 +109,13 @@ ALIASES:
   • Never use PostgreSQL reserved words as unquoted aliases (e.g. "order", "group", "date").
   • Quote aliases containing spaces or reserved words: AS "Order Date".
 
+DECISION-TREE REQUESTS:
+  • When the user explicitly requests a decision tree backed by data, return row-level
+    labeled examples with the requested decision target aliased as outcome plus the
+    meaningful feature columns needed to explain that outcome.
+  • Do not invent decision rules or manufacture an outcome column that is absent from
+    the schema/request. Do not substitute an arbitrary aggregate or median split.
+
 OUTPUT:
   • Output ONLY valid JSON. No markdown. No code fences. No explanation.
   • The "sql" value must be a single-line string (escape newlines as \\n if needed).

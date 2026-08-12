@@ -24,7 +24,7 @@ export interface ChartSpec {
     labels: string[];
     datasets: {
       label: string;
-      data: number[];
+      data: (number | null)[] | { x: number; y: number }[];
       backgroundColor?: string | string[];
       borderColor?: string | string[];
       borderWidth?: number;
@@ -37,12 +37,16 @@ export interface ChartSpec {
 export interface DiagramSpec {
   mermaid?: string;
   diagram_type?: 'er' | 'process' | 'decision';
+  process_mode?: 'state_transitions' | 'ordered_steps' | 'agent_pipeline' | 'not_applicable';
+  decision_mode?: 'rule_hierarchy' | 'learned_classification' | 'not_applicable';
+  decision_target?: string | null;
 }
 
 export interface ToolCall {
   tool: string;
   status: string;
   duration_ms?: number;
+  attempts?: number;
 }
 
 export interface ChatMessage {
@@ -59,6 +63,7 @@ export interface ChatMessage {
   rawResults?: Record<string, any>[];
   summary?: string;
   chartSpec?: ChartSpec;
+  chartSpecs?: ChartSpec[];
   diagramSpec?: DiagramSpec[];
   toolCalls?: ToolCall[];
   errorMessage?: string;

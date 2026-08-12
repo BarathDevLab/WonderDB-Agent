@@ -7,12 +7,12 @@ Each worker calls a specific MCP tool and appends its result to GlobalState.visu
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any
 
 from agent.mcp_client import get_mcp_session
-from agent.state import GlobalState
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,10 +23,30 @@ async def _call_tool(session: Any, tool_name: str, arguments: dict) -> dict[str,
     raw_text = result.content[0].text if result.content else "{}"
     return json.loads(raw_text)
 
+
+async def _call_tool_with_retry(
+    session: Any,
+    tool_name: str,
+    arguments: dict,
+    max_attempts: int = 2,
+) -> tuple[dict[str, Any], int]:
+    """Retry a deterministic visualization call once on transport/tool failure."""
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await _call_tool(session, tool_name, arguments), attempt
+        except Exception as exc:
+            last_error = exc
+            if attempt < max_attempts:
+                await asyncio.sleep(0.1 * attempt)
+    assert last_error is not None
+    raise last_error
+
 async def chart_worker_node(state: dict[str, Any]) -> dict[str, Any]:
     """Worker to generate a chart. Input is state fragment with 'dataset' and 'chart_type'."""
     raw_data = state.get("dataset", [])
     chart_type = state.get("chart_type", "auto")
+    request = state.get("request", "")
     
     logger.info(f"Chart worker starting for chart_type: {chart_type}")
     
@@ -36,16 +56,20 @@ async def chart_worker_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         session = await get_mcp_session()
         t0 = time.monotonic()
-        chart_spec = await _call_tool(session, "generate_chart", {
+        chart_spec, attempts = await _call_tool_with_retry(session, "generate_chart", {
             "raw_data": raw_data,
             "chart_type": chart_type,
+            "request": request,
         })
         duration_ms = round((time.monotonic() - t0) * 1000, 1)
         logger.info(f"Chart worker succeeded in {duration_ms}ms")
         
         return {
             "visualizations": [chart_spec],
-            "tool_calls": [{"tool": "generate_chart", "status": "done", "duration_ms": duration_ms}]
+            "tool_calls": [{
+                "tool": "generate_chart", "status": "done",
+                "duration_ms": duration_ms, "attempts": attempts,
+            }]
         }
     except Exception as exc:
         logger.warning("generate_chart worker failed: %s", exc)
@@ -59,7 +83,7 @@ async def er_worker_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         session = await get_mcp_session()
         t0 = time.monotonic()
-        er_spec = await _call_tool(session, "generate_flowchart", {
+        er_spec, attempts = await _call_tool_with_retry(session, "generate_flowchart", {
             "diagram_type": "er",
             "schema": schema,
         })
@@ -68,7 +92,10 @@ async def er_worker_node(state: dict[str, Any]) -> dict[str, Any]:
         
         return {
             "visualizations": [er_spec],
-            "tool_calls": [{"tool": "generate_flowchart[er]", "status": "done", "duration_ms": duration_ms}]
+            "tool_calls": [{
+                "tool": "generate_flowchart[er]", "status": "done",
+                "duration_ms": duration_ms, "attempts": attempts,
+            }]
         }
     except Exception as exc:
         logger.warning("generate_flowchart(er) worker failed: %s", exc)
@@ -86,7 +113,7 @@ async def process_worker_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         session = await get_mcp_session()
         t0 = time.monotonic()
-        process_spec = await _call_tool(session, "generate_flowchart", {
+        process_spec, attempts = await _call_tool_with_retry(session, "generate_flowchart", {
             "diagram_type": "process",
             "raw_data": raw_data,
             "title": title[:60],
@@ -96,7 +123,10 @@ async def process_worker_node(state: dict[str, Any]) -> dict[str, Any]:
         
         return {
             "visualizations": [process_spec],
-            "tool_calls": [{"tool": "generate_flowchart[process]", "status": "done", "duration_ms": duration_ms}]
+            "tool_calls": [{
+                "tool": "generate_flowchart[process]", "status": "done",
+                "duration_ms": duration_ms, "attempts": attempts,
+            }]
         }
     except Exception as exc:
         logger.warning("generate_flowchart(process) worker failed: %s", exc)
@@ -114,7 +144,7 @@ async def decision_worker_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         session = await get_mcp_session()
         t0 = time.monotonic()
-        decision_spec = await _call_tool(session, "generate_flowchart", {
+        decision_spec, attempts = await _call_tool_with_retry(session, "generate_flowchart", {
             "diagram_type": "decision",
             "raw_data": raw_data,
             "title": title[:60],
@@ -124,7 +154,10 @@ async def decision_worker_node(state: dict[str, Any]) -> dict[str, Any]:
         
         return {
             "visualizations": [decision_spec],
-            "tool_calls": [{"tool": "generate_flowchart[decision]", "status": "done", "duration_ms": duration_ms}]
+            "tool_calls": [{
+                "tool": "generate_flowchart[decision]", "status": "done",
+                "duration_ms": duration_ms, "attempts": attempts,
+            }]
         }
     except Exception as exc:
         logger.warning("generate_flowchart(decision) worker failed: %s", exc)

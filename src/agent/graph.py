@@ -76,9 +76,13 @@ def dynamic_viz_routing(state: GlobalState):
     for viz in viz_required:
         if viz.endswith("_chart") and dataset:
             chart_type = viz.replace("_chart", "")
-            sends.append(Send("chart_worker", {"dataset": dataset, "chart_type": chart_type}))
+            sends.append(Send("chart_worker", {
+                "dataset": dataset,
+                "chart_type": chart_type,
+                "request": prompt,
+            }))
 
-        elif viz == "er_diagram" and schemas:
+        elif viz == "er_diagram":
             sends.append(Send("er_worker", {"schema": schemas}))
 
         elif viz == "process_flow" and dataset:
