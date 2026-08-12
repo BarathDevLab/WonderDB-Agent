@@ -2,6 +2,8 @@
 
 An enterprise-grade, multi-tenant **Text-to-SQL Platform** built for modern database interactions. It safely translates natural language prompts into dialect-specific SQL, validates execution through AST parsing and cost guardrails, executes queries against isolated read-only PostgreSQL replicas, and streams real-time reasoning logs, dataset tables, and dynamic visual analytics to a responsive React frontend via Server-Sent Events (SSE).
 
+live website : https://ai-agent-database-snowy.vercel.app/
+
 ---
 
 ## 📋 Table of Contents
