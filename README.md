@@ -1,409 +1,467 @@
-# AI Database Agent 🚀 (Enterprise Text-to-SQL Platform)
+# AI Database Agent
 
-An enterprise-grade, multi-tenant **Text-to-SQL Platform** built for modern database interactions. It safely translates natural language prompts into dialect-specific SQL, validates execution through AST parsing and cost guardrails, executes queries against isolated read-only PostgreSQL replicas, and streams real-time reasoning logs, dataset tables, and dynamic visual analytics to a responsive React frontend via Server-Sent Events (SSE).
+> A ChatGPT-style interface for asking questions about a PostgreSQL database in natural language, inspecting its schema, and receiving tables, charts, Mermaid diagrams, and plain-language explanations.
 
-live website : https://ai-agent-database-snowy.vercel.app/
+AI Database Agent is an end-to-end Text-to-SQL application. A React chat interface sends a request to a FastAPI service, where a LangGraph workflow retrieves schema context, asks Gemini to generate a safe PostgreSQL `SELECT`, executes it through an MCP tool server, and streams the result back to the browser over Server-Sent Events (SSE).
 
----
+The project includes multi-tenant sample data, query validation, query cost checks, PII masking, semantic caching, session memory, charts, and ER diagrams.
 
-## 📋 Table of Contents
+## Contents
 
-- [💡 About the Project](#-about-the-project)
-- [🏗️ System Architecture](#️-system-architecture)
-- [✨ Key Features](#-key-features)
-- [⚙️ Prerequisites](#️-prerequisites)
-- [🗄️ Redis & PostgreSQL Installation](#️-redis--postgresql-installation)
-  - [Option A: Docker Setup (Recommended)](#option-a-docker-setup-recommended)
-  - [Option B: Manual Local Setup](#option-b-manual-local-setup)
-- [🐍 Backend Setup (Python & Pip)](#-backend-setup-python--pip)
-- [💻 Frontend Setup](#-frontend-setup)
-- [☁️ Render Cloud Deployment](#-render-cloud-deployment)
-- [🔑 Environment Variables](#-environment-variables)
-- [🔌 API Endpoints & Usage](#-api-endpoints--usage)
-- [🛠️ Utility Scripts](#️-utility-scripts)
-- [🔒 Security & Guardrails](#-security--guardrails)
-- [❓ Troubleshooting](#-troubleshooting)
-- [👥 Team & Contributors](#-team--contributors)
+- [What it does](#what-it-does)
+- [Current architecture](#current-architecture)
+- [Key features](#key-features)
+- [Required tool reference](#required-tool-reference)
+- [Supported outputs](#supported-outputs)
+- [Repository structure](#repository-structure)
+- [Prerequisites](#prerequisites)
+- [Quick start](#quick-start)
+- [Docker setup](#docker-setup)
+- [Configuration](#configuration)
+- [Using the application](#using-the-application)
+- [API and streaming reference](#api-and-streaming-reference)
+- [Sample schema](#sample-schema)
+- [Safety model](#safety-model)
+- [Current constraints and roadmap](#current-constraints-and-roadmap)
+- [Troubleshooting](#troubleshooting)
+- [Technology stack](#technology-stack)
 
----
+## What it does
 
-## 💡 About the Project
+Ask questions such as:
 
-Traditional database access often requires writing complex SQL queries or relying heavily on data engineering teams for reporting. **AI Database Agent** bridges this gap by providing an intuitive, secure natural language interface for multi-tenant enterprise databases.
+```text
+Show monthly revenue and explain the trend.
+Who are the top customers by total spend?
+Show order status distribution as a pie chart.
+Draw the ER diagram for the database.
+What tables are related to orders?
+```
 
-The platform follows a **"Brain vs. Hands" architecture** powered by the **Model Context Protocol (MCP)**:
+For a data question, the application:
 
-- **🧠 Orchestration Brain**: Powered by **LangGraph**, it coordinates intent classification, Schema Retrieval-Augmented Generation (Schema RAG), query planning, reflection, and output formatting.
-- **🛠️ Execution Hands**: Operating as an isolated **MCP Tool Server**, it safely executes database inspection, AST parsing, EXPLAIN cost estimations, and query execution within multi-tenant Row-Level Security (RLS) contexts.
-- **⚡ Real-Time SSE Streaming**: Emits instant updates for agent reasoning steps, tabular data sets, Mermaid ERD graphs, and Chart.js chart configurations directly to the user interface.
-- **⚡ Semantic Caching**: Uses **Redis** vector/key-value caching to instantly serve repeated natural language queries without invoking LLM tokens.
+1. Retrieves relevant database schema context.
+2. Uses Gemini to identify the request and generate PostgreSQL `SELECT` SQL.
+3. Validates the query with SQLGlot.
+4. Estimates cost with `EXPLAIN (FORMAT JSON)`.
+5. Runs the query with a result cap and redacts sensitive fields.
+6. Generates an explanation, chart, or Mermaid diagram when the request calls for one.
+7. Streams progress, SQL, rows, and final visual specifications to the UI.
 
----
-
-## 🏗️ System Architecture
+## Current architecture
 
 ```mermaid
 flowchart TD
-    User([User / Browser]) <--> ReactUI[React 18 + Vite Frontend]
-    ReactUI <-->|SSE / REST API| FastAPI[FastAPI Backend Gateway]
-    
-    subgraph Backend Core
-        FastAPI <--> LangGraph[LangGraph Orchestrator - Brain]
-        LangGraph <--> SchemaRAG[Schema RAG Service + pgvector]
-        LangGraph <--> RedisCache[(Redis Semantic Cache)]
-        LangGraph <-->|MCP Protocol| MCPClient[MCP Client Manager]
+    User([User]) --> UI[React + Vite chat UI]
+    UI -->|POST /api/v1/agent/stream<br/>SSE response| API[FastAPI API]
+
+    subgraph Agent workflow
+        API --> Plan[LangGraph: plan]
+        Plan --> Cache[(Semantic cache)]
+        Plan --> SchemaRAG[Schema RAG]
+        Plan --> Route{Route request}
+        Route -->|data query| Execute[execute]
+        Execute --> Reflect[reflect on query failure]
+        Reflect --> Plan
+        Execute --> Summarize[summarize]
+        Route -->|schema request| Summarize
+        Route -->|chat/follow-up| Chat[chat]
     end
 
-    subgraph MCP Tool Server - Hands
-        MCPClient <-->|Stdio Subprocess| MCPServer[MCP Server Process]
-        MCPServer --> SQLGlot[SQLGlot AST Parser & Sanitizer]
-        MCPServer --> CostGate[EXPLAIN Cost Gate Evaluator]
-        MCPServer <--> PostgreSQL[(PostgreSQL Database + RLS)]
+    subgraph MCP tool server
+        Execute --> SQLTool[execute_query]
+        Summarize --> ExplainTool[explain_data]
+        Summarize --> ChartTool[generate_chart]
+        Summarize --> DiagramTool[generate_flowchart]
+        SQLTool --> Guardrails[AST validation + cost gate + PII redaction]
+        Guardrails --> Postgres[(PostgreSQL)]
     end
+
+    SchemaRAG --> Postgres
+    Cache --> Redis[(Redis)]
 ```
 
----
+### Current execution model
 
-## ✨ Key Features
+The present implementation is a controlled workflow agent, not yet a general multi-task DAG agent. Each prompt is classified into one primary route: `query`, `schema`, `chat`, or `contextual`. It can combine a query with an explanation and one chart, but a request with several independent deliverables—such as a trend analysis, ER diagram, and process diagram—cannot be guaranteed to produce all outputs in one turn.
 
-- **Natural Language to SQL**: Converts complex business prompts into optimized SQL statements.
-- **Multi-Tenant Isolation**: Enforces PostgreSQL Row-Level Security (RLS) dynamically using tenant-scoped context headers.
-- **AST Parsing & Validation**: Uses `SQLGlot` to parse queries, detect syntax errors, sanitize inputs, and prevent SQL injection or illegal data mutations.
-- **EXPLAIN Cost Guardrails**: Pre-evaluates query execution plans before execution to block heavy table scans or runaway queries.
-- **Schema RAG Bootstrap**: Automatically indexes database schemas into vector embeddings (`pgvector`) for precise schema retrieval during query generation.
-- **Dynamic Visualizations**: Auto-selects chart types (Bar, Line, Pie, Doughnut) and builds dynamic Chart.js chart configurations on the fly based on query results.
-- **Schema & ERD Inspection**: Generates dynamic Mermaid diagram definitions representing database entities and relationships.
+The planned evolution is a task-and-artifact architecture: decompose a request into several tool tasks, execute dependency-ready tasks, record each table/chart/diagram as an artifact, recover individual failures with bounded retries, and verify that every requested artifact was delivered.
 
----
+## Key features
 
-## ⚙️ Prerequisites
+- Natural language to PostgreSQL `SELECT` queries with Gemini.
+- Real-time SSE updates for planning, execution, retries, and final output.
+- LangGraph orchestration with a SQL reflection/retry path.
+- MCP tool server that separates orchestration from database operations.
+- Live schema discovery from `information_schema`.
+- Schema retrieval with pgvector/Gemini embeddings when configured.
+- Chart.js specifications for bar, line, pie, and scatter charts.
+- Mermaid specifications for ER diagrams, process flows, and decision trees.
+- SQL transparency: generated SQL is available in the chat UI.
+- SQLGlot SELECT-only validation and multi-statement rejection.
+- `EXPLAIN` cost threshold, timeout, and row-limit controls.
+- PII masking by sensitive column name and common value patterns.
+- Redis-backed semantic cache and session event history with in-memory fallbacks.
+- Multi-tenant PostgreSQL seed data and RLS policy definitions.
+- Session history stored in the browser, with Markdown export.
 
-Ensure you have the following installed on your machine:
+## Required tool reference
 
-- **Python**: Version `3.11` or higher
-- **Node.js**: Version `18.0` or higher (with `npm` v9+)
-- **PostgreSQL**: Version `16+` (with `pgvector` extension enabled)
-- **Redis**: Version `7+`
-- **Docker & Docker Compose**: (Optional, but recommended for quick setup)
-- **Google Gemini API Key**: (Required for LLM generation & embeddings)
+The MCP server exposes the five required tools in [`src/mcp_server/server.py`](src/mcp_server/server.py).
 
----
+| Tool | Input | Output | Purpose |
+|---|---|---|---|
+| `get_schema` | None | Tables, columns, primary keys, and foreign keys | Discovers the live PostgreSQL schema for retrieval and ER diagrams. |
+| `execute_query` | `sql`, `tenant_id` | Rows, query cost, or an error | Validates, limits, estimates, executes, and redacts a PostgreSQL query. |
+| `generate_chart` | Rows, chart type | Chart.js configuration | Builds `bar`, `line`, `pie`, or `scatter` chart specs. |
+| `generate_flowchart` | Diagram type, schema or rows | Mermaid definition | Produces `er`, `process`, or `decision` diagrams. |
+| `explain_data` | Prompt, rows | Summary and metrics | Explains query data in plain language using Gemini, with a deterministic fallback message. |
 
-## 🗄️ Redis & PostgreSQL Installation
+## Supported outputs
 
-You can set up Redis and PostgreSQL using **Docker Compose** (easiest) or via **Manual Local Installation**.
+| Output | Backend support | UI support | Notes |
+|---|---|---|---|
+| Tables | Yes | Yes | Results are displayed in a data grid. |
+| Bar chart | Yes | Yes | Supported end to end. |
+| Line chart | Yes | Yes | Supported end to end. |
+| Pie chart | Yes | Yes | Supported end to end. |
+| Scatter chart | Yes | Not currently rendered | The MCP tool can generate it, but the current React renderer does not include a scatter branch. |
+| ER diagram | Yes | Yes | Generated from schema foreign-key metadata and rendered with Mermaid. |
+| Process flow | Yes | Partially routed | The tool supports it, but current planner routing prioritizes ER-style schema output. |
+| Decision tree | Yes | Partially routed | The tool supports it; dedicated request planning is still needed. |
 
-### Option A: Docker Setup (Recommended)
+## Repository structure
 
-If Docker Desktop or Docker Engine is installed, you can launch PostgreSQL (with `pgvector`) and Redis with a single command from the project root:
-
-```bash
-# Start PostgreSQL, Redis, and API containers in detached mode
-docker-compose up -d
+```text
+ai-agent-database/
+├── frontend/                         # React + Vite + Tailwind client
+│   └── src/
+│       ├── components/               # Chat, charts, diagrams, schema explorer
+│       ├── hooks/useAgentStream.ts   # SSE client and local chat sessions
+│       └── App.tsx
+├── src/
+│   ├── agent/
+│   │   ├── graph.py                  # LangGraph workflow and routing
+│   │   ├── mcp_client.py             # Long-lived stdio MCP client
+│   │   ├── sse.py                    # LangGraph-to-SSE conversion
+│   │   └── nodes/                    # plan, execute, reflect, summarize, chat
+│   ├── app/
+│   │   ├── main.py                   # FastAPI lifespan, middleware, static mounting
+│   │   └── api/v1/                   # Agent stream, health, cache, sessions endpoints
+│   ├── core/                         # AST validation, cost evaluation, PII redaction
+│   ├── db/                           # Pool, migrations, RLS script, seed data
+│   ├── mcp_server/server.py          # Five MCP tools
+│   └── services/                     # Schema RAG, cache, and session memory
+├── scripts/                          # Database initialization helpers
+├── docs/                             # Architecture and deployment documentation
+├── docker-compose.yml                # PostgreSQL, Redis, API services
+├── Dockerfile                        # FastAPI container image
+├── requirements.txt
+└── README.md
 ```
 
-To stop the containers:
-```bash
-docker-compose down
-```
+## Prerequisites
 
----
+- Python 3.11 or later.
+- Node.js 18 or later.
+- PostgreSQL 16+ with the `vector` extension for semantic schema retrieval. The project can still start when pgvector/Gemini embeddings are unavailable, but retrieval quality is reduced.
+- Redis 7+ for semantic caching and session memory. The application has fallbacks when Redis is unavailable.
+- A Google Gemini API key for natural-language planning and data explanations.
+- Docker Desktop and Docker Compose are recommended for PostgreSQL and Redis.
 
-### Option B: Manual Local Setup
+## Quick start
 
-If you prefer installing services directly on your host operating system:
+### 1. Configure environment variables
 
-#### 1. PostgreSQL Setup
+Create a local environment file from the example:
 
-##### Installation:
-- **Windows**: Download and run the official installer from [postgresql.org](https://www.postgresql.org/download/windows/).
-- **macOS**: Install via Homebrew:
-  ```bash
-  brew install postgresql@16
-  brew services start postgresql@16
-  ```
-- **Ubuntu/Debian**:
-  ```bash
-  sudo apt update
-  sudo apt install postgresql postgresql-contrib
-  sudo systemctl start postgresql
-  ```
-
-##### Installing `pgvector` Extension:
-- Follow instructions at [github.com/pgvector/pgvector](https://github.com/pgvector/pgvector#installation) to compile/install `pgvector` for your OS.
-
-##### Database & User Configuration:
-1. Open the PostgreSQL prompt:
-   ```bash
-   psql -U postgres
-   ```
-2. Create the database and user:
-   ```sql
-   CREATE DATABASE enterprise_db;
-   CREATE USER postgres WITH PASSWORD 'password';
-   GRANT ALL PRIVILEGES ON DATABASE enterprise_db TO postgres;
-   \c enterprise_db
-   CREATE EXTENSION IF NOT EXISTS vector;
-   \q
-   ```
-3. Initialize tables and seed initial data:
-   ```bash
-   psql -U postgres -d enterprise_db -f src/db/init_rls.sql
-   psql -U postgres -d enterprise_db -f src/db/seed_data.sql
-   ```
-
-#### 2. Redis Setup
-
-##### Installation:
-- **Windows**: Install via WSL2 (`sudo apt install redis-server`) or download pre-compiled Windows binaries.
-- **macOS**:
-  ```bash
-  brew install redis
-  brew services start redis
-  ```
-- **Linux**:
-  ```bash
-  sudo apt install redis-server
-  sudo systemctl start redis-server
-  ```
-
-##### Verify Redis is running:
-```bash
-redis-cli ping
-# Expected response: PONG
-```
-
----
-
-## 🐍 Backend Setup (Python & Pip)
-
-Follow these steps to set up the FastAPI backend using standard **Python** and **pip**.
-
-### 1. Clone the Repository & Navigate to Root
-```bash
-cd ai-agent-database
-```
-
-### 2. Create and Activate a Python Virtual Environment
-
-- **On Windows (PowerShell):**
-  ```powershell
-  python -m venv venv
-  .\venv\Scripts\activate
-  ```
-
-- **On macOS / Linux:**
-  ```bash
-  python3 -m venv venv
-  source venv/bin/activate
-  ```
-
-### 3. Upgrade Pip & Install Dependencies
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. Configure Environment Variables
-Copy the sample environment file to `.env`:
-```bash
-# On Windows PowerShell:
+```powershell
 Copy-Item .env.example .env
-
-# On macOS / Linux:
-cp .env.example .env
 ```
-Edit `.env` and set your credentials (especially `GEMINI_API_KEY`):
+
+Set a valid Gemini key and model values in `.env`:
+
 ```env
-APP_NAME="AI Database Assistant"
-ENV="development"
-PORT=8000
-
-POSTGRES_HOST="localhost"
-POSTGRES_PORT=5432
-POSTGRES_USER="postgres"
-POSTGRES_PASSWORD="password"
-POSTGRES_DB="enterprise_db"
-
-REDIS_URL="redis://localhost:6379/0"
-
-GEMINI_API_KEY="your_actual_gemini_api_key_here"
-GEMINI_MODEL="gemini-1.5-flash"
-GEMINI_EMBEDDING_MODEL="text-embedding-004"
-ENABLE_SEMANTIC_CACHE=true
+GEMINI_API_KEY="your-key"
+GEMINI_MODEL="gemini-3.1-flash-lite"
+GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
 ```
 
-### 5. Seed the Database
-Populate database tables and create order items:
-```bash
-python scripts/init_and_seed_db.py
-python scripts/seed_order_items.py
+### 2. Start PostgreSQL and Redis
+
+```powershell
+docker compose up -d postgres redis
 ```
 
-### 6. Run the FastAPI Development Server
-```bash
-python main.py
-```
-*Or using Uvicorn directly:*
-```bash
-uvicorn app.main:app --reload --app-dir src --host 127.0.0.1 --port 8000
-```
+The first initialization creates the schema and seed data automatically through `src/db/init_rls.sql` and `src/db/seed_data.sql`.
 
-Verify backend health at `http://localhost:8000/health` or explore Swagger docs at `http://localhost:8000/docs`.
+### 3. Run the API
 
----
-
-## 💻 Frontend Setup
-
-The frontend is built with **React 18**, **Vite**, **TypeScript**, and **Tailwind CSS**.
-
-### 1. Navigate to Frontend Directory
-Open a new terminal window and navigate to `frontend`:
-```bash
-cd frontend
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir src --reload
 ```
 
-### 2. Install Node Dependencies
-```bash
+The API is available at:
+
+- Health: `http://localhost:8000/health`
+- API health: `http://localhost:8000/api/v1/health`
+- OpenAPI: `http://localhost:8000/docs`
+
+### 4. Run the frontend
+
+In a second terminal:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+Set-Location frontend
 npm install
-```
-
-### 3. Start the Development Server
-```bash
 npm run dev
 ```
 
-The application will start at `http://localhost:5173/`. Open your browser and navigate to this URL to interact with the system.
+Open `http://localhost:5173`.
 
-### 4. Build for Production (Optional)
-```bash
-npm run build
+The Vite development server proxies `/api` requests to `http://localhost:8000`. To target another API address, set `VITE_API_BASE_URL` in `frontend/.env`.
+
+## Docker setup
+
+Start the supplied services:
+
+```powershell
+docker compose up --build
 ```
 
----
+This starts PostgreSQL, Redis, and the FastAPI service on port `8000`.
 
-## ☁️ Render Cloud Deployment
+> Current deployment note: the Dockerfile builds the API service only. It does not build and copy `frontend/dist`, so the production container does not currently include the React user interface. Run the Vite frontend separately or add a frontend build stage before treating this as a single-container application deployment.
 
-The repository includes a ready-to-use [`render.yaml`](file:///c:/Users/chida/OneDrive/Desktop/project/ai-agent-database/render.yaml) Infrastructure Blueprint file for deploying the complete stack to [Render](https://render.com) with one click.
+To stop the stack:
 
-### Quick Blueprint Deployment:
-1. Push your repository to **GitHub** or **GitLab**.
-2. Go to [Render Dashboard](https://dashboard.render.com/) $\rightarrow$ Click **New +** $\rightarrow$ **Blueprint**.
-3. Connect your repository. Render will automatically provision:
-   - **PostgreSQL Database** with `pgvector`
-   - **Redis Cache**
-   - **FastAPI Backend Web Service**
-   - **React Static Site Frontend**
-4. Provide your **`GEMINI_API_KEY`** when prompted for environment variables.
-5. Click **Apply**. Render handles installation, migrations, and service linking automatically!
+```powershell
+docker compose down
+```
 
-> For full step-by-step manual deployment instructions, see the detailed [Render Deployment Guide](file:///c:/Users/chida/OneDrive/Desktop/project/ai-agent-database/docs/RENDER_DEPLOYMENT.md).
+To reset local database volumes and recreate seeded data:
 
----
+```powershell
+docker compose down -v
+docker compose up --build
+```
 
-## 🔑 Environment Variables
+This removes local Docker database and Redis volumes.
 
-The backend application reads configuration from `.env`. Below is a reference of available settings:
+## Configuration
 
-| Variable | Type | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `APP_NAME` | String | `AI Database Assistant` | Application display name |
-| `ENV` | String | `development` | Deployment environment (`development` / `production`) |
-| `PORT` | Integer | `8000` | Port for the FastAPI server |
-| `POSTGRES_HOST` | String | `localhost` | PostgreSQL hostname |
-| `POSTGRES_PORT` | Integer | `5432` | PostgreSQL port |
-| `POSTGRES_USER` | String | `postgres` | Database username |
-| `POSTGRES_PASSWORD` | String | `postgres` | Database password |
-| `POSTGRES_DB` | String | `enterprise_db` | Target PostgreSQL database name |
-| `REDIS_URL` | String | `redis://localhost:6379/0` | Connection string for Redis |
-| `GEMINI_API_KEY` | String | *(Required)* | Google Gemini API Key |
-| `GEMINI_MODEL` | String | `gemini-1.5-flash` | LLM model name for reasoning |
-| `GEMINI_EMBEDDING_MODEL` | String | `text-embedding-004` | Model used for vector embeddings |
-| `ENABLE_SEMANTIC_CACHE` | Boolean | `true` | Enables/Disables Redis semantic vector cache |
-| `APP_API_KEY` | String | `""` | Optional API Key for authentication header (`X-API-Key`) |
-| `MAX_PROMPT_LENGTH` | Integer | `2000` | Maximum character length for user input prompts |
+| Variable | Required | Default | Description |
+|---|---:|---|---|
+| `APP_NAME` | No | `AI Database Assistant` | Service name. |
+| `ENV` | No | `development` | Runtime environment label. |
+| `PORT` | No | `8000` | API port. |
+| `DATABASE_URL` | No | — | PostgreSQL DSN; overrides separate PostgreSQL fields. |
+| `POSTGRES_HOST` | No | `localhost` | PostgreSQL hostname. |
+| `POSTGRES_PORT` | No | `5432` | PostgreSQL port. |
+| `POSTGRES_USER` | No | `postgres` | PostgreSQL user. |
+| `POSTGRES_PASSWORD` | No | `postgres` | PostgreSQL password. |
+| `POSTGRES_DB` | No | `enterprise_db` | PostgreSQL database name. |
+| `REDIS_URL` | No | `redis://localhost:6379/0` | Redis connection URL. |
+| `GEMINI_API_KEY` | Yes for AI planning | — | Gemini API key. |
+| `GEMINI_MODEL` | Yes for AI planning | — | Gemini generation model. |
+| `GEMINI_EMBEDDING_MODEL` | Recommended | — | Gemini embedding model for Schema RAG. |
+| `ENABLE_SEMANTIC_CACHE` | No | `true` | Enables semantic cache reads/writes. |
+| `APP_API_KEY` | No | empty | Optional API key required in `X-API-Key` for non-public API endpoints. |
+| `MAX_PROMPT_LENGTH` | No | `2000` | Maximum input prompt length. |
 
----
+## Using the application
 
-## 🔌 API Endpoints & Usage
+### Query data
 
-### Primary Endpoints
+```text
+Show total sales by order status.
+Show monthly revenue as a line chart.
+Who are the top customers by total spent?
+```
 
-- **`GET /health`**
-  - **Description**: Returns service health status.
-  - **Response**: `{"status": "healthy", "service": "AI Database Assistant"}`
+The agent retrieves schema context, creates a PostgreSQL `SELECT`, validates it, executes it, and returns rows. If the request suggests a visualization, it also asks the chart tool for a Chart.js specification.
 
-- **`POST /api/chat/stream`**
-  - **Description**: Server-Sent Events (SSE) streaming endpoint processing user natural language prompts into reasoning steps, SQL queries, tabular data, and visual charts.
-  - **Headers**: `Content-Type: application/json`, `X-Tenant-ID: <uuid>` (Optional)
-  - **Body**:
-    ```json
-    {
-      "prompt": "Show total sales volume grouped by product category for this month",
-      "tenant_id": "00000000-0000-0000-0000-000000000001"
-    }
-    ```
+### Explore the schema
 
-- **`GET /docs`**
-  - **Description**: Interactive OpenAPI Swagger documentation.
+```text
+Draw the ER diagram.
+What are the relationships between orders and customers?
+Explain the products table.
+```
 
-### Testing with Postman
-A pre-configured Postman collection is included in the project root: [`postman_collection.json`](file:///c:/Users/chida/OneDrive/Desktop/project/ai-agent-database/postman_collection.json). You can import this file directly into Postman to test all REST and SSE endpoints.
+Schema requests use live metadata from `information_schema` and return a Mermaid ER diagram when requested.
 
----
+### Continue a conversation
 
-## 🛠️ Utility Scripts
+```text
+Explain that in simpler terms.
+Tell me more.
+```
 
-The `scripts/` directory contains helper scripts for database administration:
+Follow-up prompts use backend session memory when a session ID is supplied. The UI currently persists browser sessions locally; see [Current constraints and roadmap](#current-constraints-and-roadmap) for the session-boundary limitation.
 
-- **`scripts/init_and_seed_db.py`**
-  - Connects to PostgreSQL, executes SQL initialization scripts, and loads baseline tables and sample records.
-  - Usage: `python scripts/init_and_seed_db.py`
+## API and streaming reference
 
-- **`scripts/seed_order_items.py`**
-  - Populates additional realistic transactional order and order item records into the database for rich analytics queries.
-  - Usage: `python scripts/seed_order_items.py`
+Base URL: `http://localhost:8000`
 
----
+### `POST /api/v1/agent/stream`
 
-## 🔒 Security & Guardrails
+Runs an agent turn and returns `text/event-stream`.
 
-1. **Row-Level Security (RLS)**: Enforces multi-tenant data boundaries directly at the database level by setting tenant session variables (`SET LOCAL app.current_tenant = ...`) prior to query execution.
-2. **Read-Only Connections**: Queries are executed using read-only database connections to prevent unintended `DROP`, `UPDATE`, `INSERT`, or `DELETE` operations.
-3. **AST Validation**: Every SQL query generated by the LLM is parsed into an Abstract Syntax Tree (AST) using `SQLGlot` to ensure safe operation types.
-4. **Execution Cost Gates**: Runs `EXPLAIN` on generated queries before execution to ensure estimated rows and cost metrics remain under safety thresholds.
-5. **Rate Limiting & Authentication**: Built-in rate limiting middleware prevents API abuse, and optional API key middleware (`X-API-Key`) secures private instances.
+Request body:
 
----
+```json
+{
+  "prompt": "Show monthly revenue as a line chart",
+  "tenant_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+  "user_id": "console-operator",
+  "session_id": "optional-session-id"
+}
+```
 
-## ❓ Troubleshooting
+SSE events:
 
-<details>
-<summary><b>1. Error: Connection to PostgreSQL failed</b></summary>
-Ensure PostgreSQL service is running on `localhost:5432` and credentials in `.env` match your PostgreSQL setup. Check if Docker container `ai_agent_postgres` is running via `docker ps`.
-</details>
+| Event | Meaning | Important fields |
+|---|---|---|
+| `status` | Current workflow phase | `phase`, `message` |
+| `plan_ready` | Planning completed | `strategy`, `sql` |
+| `execution_complete` | Database query completed | `rows`, `data`, `cost` |
+| `reflection_retry` | SQL retry initiated | `error`, `retry` |
+| `final_response` | Final agent result | `summary`, `chart_spec`, `diagram_spec`, `tool_calls` |
+| `error` | Stream-level failure | `message` |
+| `complete` | Stream has ended | `ok` |
 
-<details>
-<summary><b>2. Error: Connection to Redis failed</b></summary>
-Ensure Redis server is running (`redis-cli ping` returns `PONG`). If running locally without Docker, verify `REDIS_URL` in `.env` points to `redis://localhost:6379/0`.
-</details>
+### Other endpoints
 
-<details>
-<summary><b>3. Error: extension "vector" is not available</b></summary>
-Install `pgvector` in your PostgreSQL instance or use the recommended Docker image `pgvector/pgvector:pg16` which has `pgvector` pre-installed.
-</details>
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Top-level API health check. |
+| `GET` | `/api/v1/health` | Versioned API health check. |
+| `POST` | `/api/v1/cache/clear` | Clears semantic query cache. |
+| `GET` | `/api/v1/sessions` | Returns session-storage information. |
+| `GET` | `/api/v1/sessions/{session_id}/history` | Returns recorded session events. |
 
-<details>
-<summary><b>4. Missing GEMINI_API_KEY</b></summary>
-Obtain an API key from Google AI Studio and place it into your `.env` file under `GEMINI_API_KEY`.
-</details>
+## Sample schema
 
----
+The supplied seed data represents a multi-tenant commerce database.
 
-## 👥 Team & Contributors
+```text
+customers ──< orders ──< order_items >── products
+```
 
-This project was built with ❤️ by:
+| Table | Description |
+|---|---|
+| `tenants` | Tenant catalog. |
+| `customers` | Customer identity and contact information. |
+| `orders` | Customer orders with status and total amount. |
+| `products` | Product catalog, category, and price. |
+| `order_items` | Line items connecting orders and products. |
+| `schema_catalog` | Schema metadata and vector embeddings used by Schema RAG. |
 
-- **Barath G**
-- **Rishabh**
-- **Saravanan**
+The seed data contains two tenants:
+
+- Acme Corporation: `a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`
+- Globex Industries: `b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22`
+
+## Safety model
+
+The project has several safeguards around LLM-generated SQL:
+
+| Control | Implementation |
+|---|---|
+| Read-only query validation | SQLGlot rejects non-`SELECT` and multi-statement input. |
+| Result limit | Missing limits are added; limits above 100 are reduced. |
+| Query budget | `EXPLAIN (FORMAT JSON)` is evaluated before execution. |
+| Timeout | Query and explain calls use a 15-second timeout. |
+| PII masking | Sensitive field names and common data patterns are replaced with `***`. |
+| Tenant context | The executor sets `app.current_tenant_id` for RLS policies. |
+| API access control | An optional `APP_API_KEY` middleware protects API routes. |
+| Rate limiting | A simple in-process, per-IP rate limit protects API routes. |
+
+### Production security warning
+
+The current Docker setup connects as `postgres`, while PostgreSQL owners/superusers can bypass RLS. The database script creates an `agent_read_only_runner` role, but `execute_query` does not yet switch to that role. In production, use an authenticated user identity, resolve tenant access server-side, and execute generated SQL through a non-owner read-only role with RLS enforced.
+
+Never expose database credentials, Gemini keys, or the supplied development passwords in a public deployment.
+
+## Current constraints and roadmap
+
+The source already contains the building blocks for a stronger agent, but these items remain before it should be described as a production-ready multi-task database agent.
+
+| Area | Current behavior | Recommended next step |
+|---|---|---|
+| Multi-task requests | One primary intent controls the workflow. A single request cannot reliably guarantee several independent outputs. | Introduce a structured task plan, dependency-aware executor, artifact registry, and completion verifier. |
+| Agent recovery | SQL failures can be reflected and retried up to three times. | Add typed, bounded recovery for individual tool failures, transient API errors, and incomplete plans. |
+| Output model | State has one `chart_spec` and one `diagram_spec`. | Return an ordered artifact list so one response can include several charts, diagrams, tables, and explanations. |
+| Scatter charts | Generated by backend but not rendered in the current UI. | Add `Scatter` support in `ChartViewer` and TypeScript chart types. |
+| Diagram routing | ER output is supported; process/decision flows are not consistently selected. | Add explicit diagram task types and permit multiple diagram artifacts. |
+| Session boundaries | Browser sessions are local; the frontend does not currently send its session ID to the backend. | Pass and persist server-side session IDs for turn-specific context. |
+| Tenant authorization | Tenant ID is supplied by the client. | Bind tenant scope to an authenticated principal on the server. |
+| Docker UI delivery | Compose runs the API, PostgreSQL, and Redis, but not a built React UI. | Add a frontend build stage or a separate frontend deployment service. |
+| Test verification | Local Python and npm execution must be available to run the existing test/build commands. | Add CI for backend tests, frontend build, multi-task workflows, retries, and tenant-isolation checks. |
+
+## Troubleshooting
+
+### The agent says Gemini is not configured
+
+Set `GEMINI_API_KEY` and `GEMINI_MODEL` in `.env`, then restart the API.
+
+### PostgreSQL connection fails
+
+Confirm the service is running:
+
+```powershell
+docker compose ps
+docker compose logs postgres
+```
+
+Verify that `.env` points to the correct host, port, database, user, and password.
+
+### Redis is unavailable
+
+The application can fall back without Redis, but semantic caching and durable session-memory behavior will be reduced. Start the Redis container with:
+
+```powershell
+docker compose up -d redis
+```
+
+### Frontend cannot call the API
+
+- Run the API on port `8000`.
+- Run Vite on port `5173`.
+- In production or a different host, set `VITE_API_BASE_URL` in `frontend/.env`.
+- If `APP_API_KEY` is enabled, provide an API-key-aware frontend or use an authenticated reverse proxy; the current UI does not send `X-API-Key`.
+
+### `npm` is blocked in PowerShell
+
+Use a process-scoped policy bypass:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+Then run `npm install` and `npm run dev` from `frontend/`.
+
+## Technology stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, Vite, TypeScript, Tailwind CSS |
+| Charts | Chart.js, react-chartjs-2 |
+| Diagrams | Mermaid |
+| API | FastAPI, Uvicorn |
+| Agent orchestration | LangGraph |
+| Tool protocol | Model Context Protocol, FastMCP |
+| LLM and embeddings | Google Gemini API |
+| Database | PostgreSQL 16, asyncpg, pgvector |
+| Query validation | SQLGlot |
+| Cache/session memory | Redis |
+| Deployment | Docker, Docker Compose, Render configuration |
+
+## Project status
+
+This project is a feature-rich Text-to-SQL prototype with a polished streaming interface and a solid tool boundary. The next architectural milestone is to move from its current fixed routing workflow to a bounded, multi-task agent that plans, executes, recovers, verifies, and returns multiple artifacts per user request.
