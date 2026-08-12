@@ -114,7 +114,7 @@ The MCP server exposes the five required hackathon tools plus grounded analytics
 | Bar chart | Yes | Yes | Supported end to end. |
 | Line chart | Yes | Yes | Supported end to end. |
 | Pie chart | Yes | Yes | Supported end to end. |
-| Scatter chart | Yes | Not currently rendered | The MCP tool can generate it, but the current React renderer does not include a scatter branch. |
+| Scatter chart | Yes | Yes | Supported end to end. |
 | ER diagram | Yes | Yes | Generated from schema foreign-key metadata and rendered with Mermaid. |
 | Process flow | Yes | Yes | Generated from query-result transition or sequential data. |
 | Decision tree | Yes | Yes | Generated from compatible result data. |
