@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { ChatMessage, ChatSession } from '../types';
+import { API_BASE_URL } from '../utils/api';
 
 const STORAGE_KEY = 'ai_db_agent_sessions_v1';
-const API_BASE_URL = (process.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
 
 function getInitialSessions(): ChatSession[] {
   try {

@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import mermaid from 'mermaid';
 import { DiagramSpec } from '../types';
-import { GitFork, Network, Workflow, Copy, Check } from 'lucide-react';
+import { GitFork, Network, Workflow, Copy, Check, Download, Maximize2 } from 'lucide-react';
+import { VisualizationModal } from './VisualizationModal';
+import { downloadSvgAsPng } from '../utils/visualizationExport';
 
 mermaid.initialize({
   startOnLoad: false,
@@ -29,6 +31,9 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
   const [svgContent, setSvgContent] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
+  const expandedDiagramRef = useRef<HTMLDivElement>(null);
 
   const mermaidCode = spec?.mermaid || '';
   const diagramType = spec?.diagram_type || 'process';
@@ -95,6 +100,25 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleDownload = async () => {
+    const root = isExpanded ? expandedDiagramRef.current : containerRef.current;
+    const svg = root?.querySelector('svg');
+    if (!svg) {
+      setDownloadStatus('error');
+      return;
+    }
+    setDownloadStatus('working');
+    try {
+      await downloadSvgAsPng(svg, getTitle());
+      setDownloadStatus('done');
+      window.setTimeout(() => setDownloadStatus('idle'), 2000);
+    } catch (downloadError) {
+      console.error('Diagram download failed:', downloadError);
+      setDownloadStatus('error');
+      window.setTimeout(() => setDownloadStatus('idle'), 4000);
+    }
+  };
+
   return (
     <div className="mt-4 mb-2 rounded-2xl border border-zinc-800/50 bg-[#1e1f20] overflow-hidden shadow-md max-w-4xl">
       {/* Diagram Header */}
@@ -106,23 +130,49 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
             Mermaid
           </span>
         </div>
-        <button
-          onClick={handleCopyMermaid}
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-mono text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-          title="Copy Mermaid Code"
-        >
-          {copied ? (
-            <>
-              <Check className="h-3 w-3 text-emerald-400" />
-              <span className="text-emerald-400">Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy className="h-3 w-3" />
-              <span>Copy Code</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => void handleDownload()}
+            disabled={downloadStatus === 'working' || !svgContent}
+            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={`Download ${getTitle()} as PNG`}
+            title={downloadStatus === 'error' ? 'Download failed' : 'Download rendered image'}
+          >
+            {downloadStatus === 'done' ? (
+              <Check className="h-4 w-4 text-emerald-400" />
+            ) : (
+              <Download className={`h-4 w-4 ${downloadStatus === 'working' ? 'animate-pulse' : ''}`} />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            aria-label={`Expand ${getTitle()}`}
+            title="Open larger canvas"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={handleCopyMermaid}
+            className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-mono text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+            title="Copy Mermaid Code"
+          >
+            {copied ? (
+              <>
+                <Check className="h-3 w-3 text-emerald-400" />
+                <span className="text-emerald-400">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="h-3 w-3" />
+                <span>Copy Code</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Diagram Render Body */}
@@ -147,6 +197,30 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
           </div>
         )}
       </div>
+
+      <VisualizationModal
+        open={isExpanded}
+        title={getTitle()}
+        onClose={() => setIsExpanded(false)}
+        onDownload={handleDownload}
+      >
+        {(zoom) => (
+          <div
+            className="mx-auto flex min-h-full items-start justify-center rounded-xl border border-zinc-800 bg-[#1e1f20] p-8 shadow-2xl"
+            style={{ width: `${zoom * 100}%` }}
+          >
+            {error ? (
+              <pre className="text-xs font-mono text-zinc-400">{mermaidCode}</pre>
+            ) : (
+              <div
+                ref={expandedDiagramRef}
+                className="w-full [&>svg]:!mx-auto [&>svg]:!h-auto [&>svg]:!max-w-none [&>svg]:!w-full"
+                dangerouslySetInnerHTML={{ __html: svgContent }}
+              />
+            )}
+          </div>
+        )}
+      </VisualizationModal>
     </div>
   );
 };

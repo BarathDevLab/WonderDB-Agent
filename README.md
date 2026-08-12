@@ -98,6 +98,7 @@ The planned evolution is a task-and-artifact architecture: decompose a request i
 - Live schema discovery from `information_schema`.
 - Schema retrieval with pgvector/Gemini embeddings when configured.
 - Chart.js specifications for bar, line, pie, and scatter charts.
+- Full-screen visualization inspection with zoom and PNG download for charts and Mermaid diagrams.
 - Mermaid specifications for ER diagrams, process flows, and decision trees.
 - SQL transparency: generated SQL is available in the chat UI.
 - SQLGlot SELECT-only validation and multi-statement rejection.
@@ -347,7 +348,7 @@ SSE events:
 |---|---|---|
 | `GET` | `/health` | Top-level API health check. |
 | `GET` | `/api/v1/health` | Versioned API health check. |
-| `POST` | `/api/v1/cache/clear` | Clears semantic query cache. |
+| `POST` | `/api/v1/cache/clear` | Clears semantic query cache and returns verified `deleted` and `remaining` key counts. |
 | `GET` | `/api/v1/sessions` | Returns session-storage information. |
 | `GET` | `/api/v1/sessions/{session_id}/history` | Returns recorded session events. |
 

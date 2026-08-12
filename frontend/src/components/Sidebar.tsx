@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { API_BASE_URL } from '../utils/api';
 import {
   Plus,
   MessageSquare,
@@ -68,7 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [isBackendHealthy, setIsBackendHealthy] = useState<boolean | null>(null);
-  const [cacheFlushed, setCacheFlushed] = useState(false);
+  const [cacheFlushStatus, setCacheFlushStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [isTenantPopoverOpen, setIsTenantPopoverOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isDatabaseInfoOpen, setIsDatabaseInfoOpen] = useState(false);
@@ -114,7 +115,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const checkHealth = async () => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/health`);
+      const res = await fetch(`${API_BASE_URL}/api/v1/health`);
       setIsBackendHealthy(res.ok);
     } catch {
       setIsBackendHealthy(false);
@@ -159,12 +160,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const handleFlushCache = async () => {
+    setCacheFlushStatus('loading');
     try {
-      await fetch('/api/v1/cache/clear', { method: 'POST' });
-      setCacheFlushed(true);
-      setTimeout(() => setCacheFlushed(false), 2500);
+      const response = await fetch(`${API_BASE_URL}/api/v1/cache/clear`, { method: 'POST' });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.detail || `Cache flush failed with HTTP ${response.status}`);
+      }
+      const result = await response.json();
+      if (result.remaining !== 0) {
+        throw new Error(`Cache flush incomplete: ${result.remaining} key(s) remain.`);
+      }
+      setCacheFlushStatus('success');
+      setTimeout(() => setCacheFlushStatus('idle'), 2500);
     } catch (e) {
       console.error(e);
+      setCacheFlushStatus('error');
+      setTimeout(() => setCacheFlushStatus('idle'), 4000);
     }
   };
 
@@ -420,11 +432,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className="flex w-full items-center justify-between rounded-lg hover:bg-zinc-800/50 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors mt-1"
                     >
                       <div className="flex items-center gap-2">
-                        <RotateCcw className={`h-3.5 w-3.5 text-zinc-400 ${cacheFlushed ? 'animate-spin' : ''}`} />
+                        <RotateCcw className={`h-3.5 w-3.5 text-zinc-400 ${cacheFlushStatus === 'loading' ? 'animate-spin' : ''}`} />
                         <span>Semantic Cache</span>
                       </div>
                       <span className="text-[10px] font-mono text-zinc-500">
-                        {cacheFlushed ? 'Flushed' : 'Flush'}
+                        {cacheFlushStatus === 'loading' ? 'Flushing' : cacheFlushStatus === 'success' ? 'Flushed' : cacheFlushStatus === 'error' ? 'Failed' : 'Flush'}
                       </span>
                     </button>
 
@@ -553,11 +565,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className="flex w-full items-center justify-between rounded-lg hover:bg-zinc-800/50 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors mt-1"
                     >
                       <div className="flex items-center gap-2">
-                        <RotateCcw className={`h-3.5 w-3.5 text-zinc-400 ${cacheFlushed ? 'animate-spin' : ''}`} />
+                        <RotateCcw className={`h-3.5 w-3.5 text-zinc-400 ${cacheFlushStatus === 'loading' ? 'animate-spin' : ''}`} />
                         <span>Semantic Cache</span>
                       </div>
                       <span className="text-[10px] font-mono text-zinc-500">
-                        {cacheFlushed ? 'Flushed' : 'Flush'}
+                        {cacheFlushStatus === 'loading' ? 'Flushing' : cacheFlushStatus === 'success' ? 'Flushed' : cacheFlushStatus === 'error' ? 'Failed' : 'Flush'}
                       </span>
                     </button>
 
