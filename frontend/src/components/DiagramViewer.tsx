@@ -32,6 +32,7 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
   const expandedDiagramRef = useRef<HTMLDivElement>(null);
 
   const mermaidCode = spec?.mermaid || '';
@@ -102,8 +103,20 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
   const handleDownload = async () => {
     const root = isExpanded ? expandedDiagramRef.current : containerRef.current;
     const svg = root?.querySelector('svg');
-    if (!svg) return;
-    await downloadSvgAsPng(svg, getTitle());
+    if (!svg) {
+      setDownloadStatus('error');
+      return;
+    }
+    setDownloadStatus('working');
+    try {
+      await downloadSvgAsPng(svg, getTitle());
+      setDownloadStatus('done');
+      window.setTimeout(() => setDownloadStatus('idle'), 2000);
+    } catch (downloadError) {
+      console.error('Diagram download failed:', downloadError);
+      setDownloadStatus('error');
+      window.setTimeout(() => setDownloadStatus('idle'), 4000);
+    }
   };
 
   return (
@@ -121,11 +134,16 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
           <button
             type="button"
             onClick={() => void handleDownload()}
-            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            disabled={downloadStatus === 'working' || !svgContent}
+            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={`Download ${getTitle()} as PNG`}
-            title="Download PNG"
+            title={downloadStatus === 'error' ? 'Download failed' : 'Download rendered image'}
           >
-            <Download className="h-4 w-4" />
+            {downloadStatus === 'done' ? (
+              <Check className="h-4 w-4 text-emerald-400" />
+            ) : (
+              <Download className={`h-4 w-4 ${downloadStatus === 'working' ? 'animate-pulse' : ''}`} />
+            )}
           </button>
           <button
             type="button"

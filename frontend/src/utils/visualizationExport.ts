@@ -14,6 +14,55 @@ const triggerDownload = (url: string, filename: string) => {
   anchor.remove();
 };
 
+const triggerBlobDownload = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  triggerDownload(url, filename);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const nodeTextWithBreaks = (node: Node): string => {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+  if (node instanceof Element && node.tagName.toLowerCase() === 'br') return '\n';
+  return Array.from(node.childNodes).map(nodeTextWithBreaks).join('');
+};
+
+const replaceHtmlLabelsWithSvgText = (svg: SVGSVGElement) => {
+  const numericAttribute = (element: Element, name: string) => {
+    const value = Number.parseFloat(element.getAttribute(name) || '0');
+    return Number.isFinite(value) ? value : 0;
+  };
+
+  svg.querySelectorAll('foreignObject').forEach((foreignObject) => {
+    const lines = nodeTextWithBreaks(foreignObject)
+      .split('\n')
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    const x = numericAttribute(foreignObject, 'x');
+    const y = numericAttribute(foreignObject, 'y');
+    const width = numericAttribute(foreignObject, 'width');
+    const height = numericAttribute(foreignObject, 'height');
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', String(centerX));
+    text.setAttribute('y', String(centerY));
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('dominant-baseline', 'middle');
+    text.setAttribute('fill', '#f4f4f5');
+    text.setAttribute('font-family', 'ui-sans-serif, system-ui, sans-serif');
+    text.setAttribute('font-size', '14');
+
+    (lines.length ? lines : ['']).forEach((line, index, allLines) => {
+      const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+      tspan.setAttribute('x', String(centerX));
+      tspan.setAttribute('dy', index === 0 ? `${-(allLines.length - 1) * 0.6}em` : '1.2em');
+      tspan.textContent = line;
+      text.appendChild(tspan);
+    });
+    foreignObject.replaceWith(text);
+  });
+};
+
 export const downloadCanvasAsPng = (source: HTMLCanvasElement, title: string) => {
   const canvas = document.createElement('canvas');
   canvas.width = source.width;
@@ -26,7 +75,10 @@ export const downloadCanvasAsPng = (source: HTMLCanvasElement, title: string) =>
   triggerDownload(canvas.toDataURL('image/png'), `${safeFilename(title)}.png`);
 };
 
-export const downloadSvgAsPng = async (source: SVGSVGElement, title: string) => {
+export const downloadSvgAsPng = async (
+  source: SVGSVGElement,
+  title: string,
+): Promise<'png' | 'svg'> => {
   const clone = source.cloneNode(true) as SVGSVGElement;
   const viewBox = source.viewBox.baseVal;
   const bounds = source.getBoundingClientRect();
@@ -40,8 +92,10 @@ export const downloadSvgAsPng = async (source: SVGSVGElement, title: string) => 
   clone.setAttribute('width', String(width));
   clone.setAttribute('height', String(height));
   clone.style.maxWidth = 'none';
+  replaceHtmlLabelsWithSvgText(clone);
 
-  const svgBlob = new Blob([new XMLSerializer().serializeToString(clone)], {
+  const serializedSvg = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([serializedSvg], {
     type: 'image/svg+xml;charset=utf-8',
   });
   const objectUrl = URL.createObjectURL(svgBlob);
@@ -62,7 +116,24 @@ export const downloadSvgAsPng = async (source: SVGSVGElement, title: string) => 
     context.fillStyle = '#1e1f20';
     context.fillRect(0, 0, exportWidth, exportHeight);
     context.drawImage(image, 0, 0, exportWidth, exportHeight);
-    triggerDownload(canvas.toDataURL('image/png'), `${safeFilename(title)}.png`);
+    const pngBlob = await new Promise<Blob>((resolve, reject) => {
+      try {
+        canvas.toBlob(
+          (blob) => blob ? resolve(blob) : reject(new Error('PNG encoder returned no data.')),
+          'image/png',
+        );
+      } catch (error) {
+        reject(error);
+      }
+    });
+    triggerBlobDownload(pngBlob, `${safeFilename(title)}.png`);
+    return 'png';
+  } catch (error) {
+    // Some browsers prohibit rasterizing SVG features even after HTML labels
+    // are normalized. SVG is still a rendered image and remains fully scalable.
+    console.warn('PNG diagram export failed; downloading SVG fallback.', error);
+    triggerBlobDownload(svgBlob, `${safeFilename(title)}.svg`);
+    return 'svg';
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
