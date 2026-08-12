@@ -1,14 +1,17 @@
-# AI Database Agent
+# WonderDB Agent
+
+**Live Demo:** [https://ai-agent-database-snowy.vercel.app/](https://ai-agent-database-snowy.vercel.app/)
 
 > A ChatGPT-style interface for asking questions about a PostgreSQL database in natural language, inspecting its schema, and receiving tables, charts, Mermaid diagrams, and plain-language explanations.
 
-AI Database Agent is an end-to-end Text-to-SQL application. A React chat interface sends a request to a FastAPI service, where a LangGraph workflow retrieves schema context, asks Gemini to generate a safe PostgreSQL `SELECT`, executes it through an MCP tool server, and streams the result back to the browser over Server-Sent Events (SSE).
+WonderDB Agent is an end-to-end Text-to-SQL application. A React chat interface sends a request to a FastAPI service, where a LangGraph workflow retrieves schema context, asks Gemini to generate a safe PostgreSQL `SELECT`, executes it through an MCP tool server, and streams the result back to the browser over Server-Sent Events (SSE).
 
 The project includes seven agent tools, multi-tenant sample data, query validation, query cost checks, deterministic analytics, response verification, PII masking, semantic caching, session memory, charts, and ER diagrams.
 
 ## Contents
 
 - [What it does](#what-it-does)
+- [Screenshots of the deployed prototype](#screenshots-of-the-deployed-prototype)
 - [Current architecture](#current-architecture)
 - [Key features](#key-features)
 - [Required tool reference](#required-tool-reference)
@@ -31,11 +34,10 @@ The project includes seven agent tools, multi-tenant sample data, query validati
 Ask questions such as:
 
 ```text
-Show monthly revenue and explain the trend.
-Who are the top customers by total spend?
-Show order status distribution as a pie chart.
-Draw the ER diagram for the database.
-What tables are related to orders?
+1. Based on our historical data, map out the customer journey from 'order placed' to 'delivered' or 'cancelled'. Generate a decision tree flowchart showing the probability of each transition
+2. Give me a list of all customers, including their full names, email addresses, and phone numbers, who have spent more than $500.
+3. Show order status distribution as a pie chart and draw the ER diagram for the database.
+4. Analyze the distribution of order amounts over the last 6 months. Identify any statistical outliers (using IQR) and tell me which product categories are the biggest contributors to revenue.
 ```
 
 For a data question, the application:
@@ -48,40 +50,16 @@ For a data question, the application:
 6. Generates an explanation, chart, or Mermaid diagram when the request calls for one.
 7. Streams progress, SQL, rows, and final visual specifications to the UI.
 
+## Screenshots of the deployed prototype
+
+![Line Chart Query](./screenshots/line_chart.jpeg)
+![ER Diagram Query](./screenshots/er_diagram.jpeg)
+![Revenue Trend Bar Chart](./screenshots/revenue_bar_chart.jpeg)
+![Revenue Distribution Pie Chart](./screenshots/revenue_pie_chart.jpeg)
+
 ## Current architecture
 
-```mermaid
-flowchart TD
-    User([User]) --> UI[React + Vite chat UI]
-    UI -->|POST /api/v1/agent/stream<br/>SSE response| API[FastAPI API]
-
-    subgraph Agent workflow
-        API --> Plan[LangGraph: plan]
-        Plan --> Cache[(Semantic cache)]
-        Plan --> SchemaRAG[Schema RAG]
-        Plan --> Route{Route request}
-        Route -->|data query| Execute[execute]
-        Execute --> Reflect[reflect on query failure]
-        Reflect --> Plan
-        Execute --> Summarize[summarize]
-        Route -->|schema request| Summarize
-        Route -->|chat/follow-up| Chat[chat]
-    end
-
-    subgraph MCP tool server
-        Execute --> SQLTool[execute_query]
-        Summarize --> ExplainTool[explain_data]
-        Summarize --> AnalyzeTool[analyze_data]
-        Summarize --> VerifyTool[verify_response]
-        Summarize --> ChartTool[generate_chart]
-        Summarize --> DiagramTool[generate_flowchart]
-        SQLTool --> Guardrails[AST validation + cost gate + PII redaction]
-        Guardrails --> Postgres[(PostgreSQL)]
-    end
-
-    SchemaRAG --> Postgres
-    Cache --> Redis[(Redis)]
-```
+![Agentic Data Assistant Architecture](./architecture.png)
 
 ### Current execution model
 
@@ -149,17 +127,22 @@ ai-agent-database/
 │   ├── agent/
 │   │   ├── graph.py                  # LangGraph workflow and routing
 │   │   ├── mcp_client.py             # Long-lived stdio MCP client
-│   │   ├── sse.py                    # LangGraph-to-SSE conversion
-│   │   └── nodes/                    # plan, execute, reflect, summarize, chat
+│   │   ├── sql_subgraph.py           # Subgraph for SQL generation and execution
+│   │   ├── state.py                  # Agent state definitions
+│   │   ├── nodes/                    # Supervisor, workers, SQL gen, execution, and chat nodes
+│   │   └── prompts/                  # LLM prompt templates
 │   ├── app/
 │   │   ├── main.py                   # FastAPI lifespan, middleware, static mounting
 │   │   └── api/v1/                   # Agent stream, health, cache, sessions endpoints
 │   ├── core/                         # AST validation, cost evaluation, PII redaction
-│   ├── db/                           # Pool, migrations, RLS script, seed data
+│   ├── db/                           # Database connection, RLS, models
 │   ├── mcp_server/server.py          # Five MCP tools
-│   └── services/                     # Schema RAG, cache, and session memory
+│   ├── services/                     # Schema RAG, data analysis, verification, cache, and memory
+│   ├── tests/                        # Unit and integration tests
+│   └── utils/                        # Logging and tracing utilities
 ├── scripts/                          # Database initialization helpers
 ├── docs/                             # Architecture and deployment documentation
+├── Screenshots/                      # Deployed prototype screenshots
 ├── docker-compose.yml                # PostgreSQL, Redis, API services
 ├── Dockerfile                        # FastAPI container image
 ├── requirements.txt
@@ -262,7 +245,7 @@ This removes local Docker database and Redis volumes.
 
 | Variable | Required | Default | Description |
 |---|---:|---|---|
-| `APP_NAME` | No | `AI Database Assistant` | Service name. |
+| `APP_NAME` | No | `WonderDB Agent` | Service name. |
 | `ENV` | No | `development` | Runtime environment label. |
 | `PORT` | No | `8000` | API port. |
 | `DATABASE_URL` | No | — | PostgreSQL DSN; overrides separate PostgreSQL fields. |
