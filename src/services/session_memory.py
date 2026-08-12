@@ -1,6 +1,5 @@
 import json
 import logging
-from collections import OrderedDict
 from typing import Any
 
 from db.redis import get_redis_client
@@ -18,7 +17,7 @@ class SessionMemoryService:
 
     async def append_session_event(self, session_id: str, event: dict[str, Any]) -> None:
         key = f"session:{session_id}:events"
-        payload = json.dumps(event)
+        payload = json.dumps(event, default=str)
 
         try:
             client = await get_redis_client()

@@ -109,6 +109,7 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
     Returns only the delta fields that changed — LangGraph merges into full state.
     """
     prompt = state.get("prompt", "")
+    cache_prompt = state.get("cache_prompt") or prompt
     tenant_id = state.get("tenant_id", "default-tenant")
     session_id = state.get("session_id", f"session-{tenant_id}")
     raw_results = state.get("clean_dataset", [])
@@ -298,7 +299,7 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
     if cache_enabled and (raw_results or diagram_specs):
         try:
             await set_semantic_cache(
-                prompt,
+                cache_prompt,
                 {
                     "sql_query": sql_query,
                     "summary": summary,
@@ -316,14 +317,21 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
 
     # ── Session memory update ────────────────────────────────────────────────
     try:
+        result_sample = [
+            {key: row[key] for key in list(row)[:8]}
+            for row in raw_results[:5]
+        ]
         await append_session_event(session_id, {
             "phase": "summary",
             "prompt": prompt,
+            "tenant_id": tenant_id,
             "sql_query": sql_query,
             "summary": summary,
             "chart_type": chart_spec.get("type"),
+            "chart_types": [chart.get("type") for chart in chart_specs],
             "diagram_types": [d.get("diagram_type") for d in diagram_specs],
             "rows_count": len(raw_results),
+            "result_sample": result_sample,
             "analysis_available": bool(data_analysis),
             "verification_status": response_verification.get("status", "unavailable"),
         })

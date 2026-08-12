@@ -70,7 +70,8 @@ async def sql_engine_wrapper(state: GlobalState) -> dict:
     """
     sub_state: SQLSubgraphState = {
         "tenant_id": state.get("tenant_id", "default-tenant"),
-        "prompt": state.get("prompt", ""),
+        "prompt": state.get("resolved_prompt") or state.get("prompt", ""),
+        "resolved_prompt": state.get("resolved_prompt") or state.get("prompt", ""),
         "prisma_context": state.get("retrieved_schemas", []),
         "retry_count": 0,
         "error_message": "",

@@ -18,8 +18,12 @@ from app.config import get_settings
 from db.postgres import get_shared_pool
 from services.schema_rag import retrieve_schema_context
 from services.semantic_cache import get_semantic_cache
-from services.session_memory import append_session_event
-from services.request_requirements import requested_visualizations_from_prompt
+from services.session_memory import append_session_event, get_session_history
+from services.conversation_context import build_conversation_context, format_context_for_model
+from services.request_requirements import (
+    requested_visualizations_from_prompt,
+    resolve_followup_visualizations,
+)
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -126,6 +130,7 @@ async def _classify_intent(
     prompt: str,
     api_key: str,
     model: str,
+    conversation_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """
     Single Gemini API call to classify intent and build an orchestration plan.
@@ -140,7 +145,14 @@ async def _classify_intent(
 
         # NOTE: user prompt is placed in a clearly delimited section to reduce
         # prompt-injection risk — the model sees its own instructions first.
-        user_content = f"User message to classify:\n<user_message>\n{prompt}\n</user_message>"
+        context_block = format_context_for_model(conversation_context or {})
+        user_content = (
+            "Conversation dependency (trusted application context):\n"
+            f"<conversation_context>\n{context_block}\n</conversation_context>\n\n"
+            f"Current user message to classify:\n<user_message>\n{prompt}\n</user_message>\n\n"
+            "A data follow-up requires query intent and new SQL. An explanation "
+            "follow-up requires contextual intent. Preserve explicit visualizations."
+        )
 
         payload = {
             "contents": [{"role": "user", "parts": [{"text": f"{_SYSTEM_PROMPT}\n\n{user_content}"}]}],
@@ -224,27 +236,48 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     if len(prompt) > _MAX_PROMPT_CHARS:
         prompt = prompt[:_MAX_PROMPT_CHARS]
 
+    history = [
+        event for event in await get_session_history(session_id, limit=20)
+        if event.get("tenant_id") == tenant_id
+    ]
+    conversation_context = build_conversation_context(history, prompt)
+    resolved_prompt = conversation_context.get("resolved_prompt", prompt)
+    schema_prompt = conversation_context.get("schema_prompt", prompt)
+    cache_prompt = resolved_prompt
 
     # ── 3. Semantic cache gate ──────────────────────────────────────────────
     if cache_enabled:
         try:
-            cached = await get_semantic_cache(prompt, tenant_id)
+            cached = await get_semantic_cache(
+                cache_prompt,
+                tenant_id,
+                exact_only=conversation_context.get("is_followup", False),
+            )
         except Exception as exc:
             logger.warning("Semantic cache lookup failed, proceeding without cache: %s", exc)
             cached = None
 
         if cached:
-            await append_session_event(session_id, {
-                "phase": "plan", "prompt": prompt,
-                "sql_query": cached.get("sql_query", ""), "cache_hit": True,
-            })
-            # Reconstruct visualizations list from cached chart/diagram specs
-            viz: list[dict] = []
             cached_charts = cached.get("chart_specs") or (
                 [cached["chart_spec"]] if cached.get("chart_spec") else []
             )
+            cached_diagrams = cached.get("diagram_spec", [])
+            await append_session_event(session_id, {
+                "phase": "summary", "prompt": prompt,
+                "tenant_id": tenant_id,
+                "sql_query": cached.get("sql_query", ""),
+                "summary": cached.get("summary", ""),
+                "rows_count": len(cached.get("raw_results", [])),
+                "result_sample": cached.get("raw_results", [])[:5],
+                "chart_type": cached_charts[0].get("type") if cached_charts else None,
+                "chart_types": [chart.get("type") for chart in cached_charts],
+                "diagram_types": [diagram.get("diagram_type") for diagram in cached_diagrams],
+                "cache_hit": True,
+            })
+            # Reconstruct visualizations list from cached chart/diagram specs
+            viz: list[dict] = []
             viz.extend(cached_charts)
-            for d in cached.get("diagram_spec", []):
+            for d in cached_diagrams:
                 viz.append(d)
 
             return {
@@ -260,12 +293,15 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
                 # Cache hit bypasses all workers; supervisor_plan not used for routing
                 "supervisor_plan": {"intent": "query", "visualizations": [], "needs_explanation": False},
                 "current_phase": "planning_complete",
+                "resolved_prompt": resolved_prompt,
+                "cache_prompt": cache_prompt,
+                "conversation_context": conversation_context,
             }
 
     # ── 4a. Schema retrieval ────────────────────────────────────────────────
     try:
         pool = await get_shared_pool()
-        retrieved_schemas = await retrieve_schema_context(prompt, tenant_id, pool)
+        retrieved_schemas = await retrieve_schema_context(schema_prompt, tenant_id, pool)
     except Exception as exc:
         logger.error("Schema retrieval failed: %s", exc)
         retrieved_schemas = []
@@ -286,6 +322,7 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
         prompt=prompt,
         api_key=settings.gemini_api_key,
         model=settings.gemini_model,
+        conversation_context=conversation_context,
     )
 
     if not plan:
@@ -293,9 +330,25 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
         logger.warning("Intent classification returned None — defaulting to query intent")
         plan = {"intent": "query", "visualizations": [], "needs_explanation": True}
 
+    plan["visualizations"] = resolve_followup_visualizations(
+        prompt,
+        conversation_context,
+        plan.get("visualizations", []),
+    )
+
+    followup_kind = conversation_context.get("followup_kind")
+    if followup_kind == "data":
+        plan["intent"] = "query"
+        plan["needs_explanation"] = True
+    elif followup_kind == "explanation":
+        plan["intent"] = "contextual"
+        plan["visualizations"] = []
+        plan["needs_explanation"] = True
+
     await append_session_event(session_id, {
         "phase": "plan",
         "prompt": prompt,
+        "tenant_id": tenant_id,
         "intent": plan.get("intent", "query"),
         "cache_hit": False,
     })
@@ -309,4 +362,7 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
         "has_fatal_error": False,
         "error_detail": "",
         "current_phase": "planning_complete",
+        "resolved_prompt": resolved_prompt,
+        "cache_prompt": cache_prompt,
+        "conversation_context": conversation_context,
     }
