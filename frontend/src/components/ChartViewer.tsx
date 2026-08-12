@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -14,8 +14,10 @@ import {
   Filler,
 } from 'chart.js';
 import { Bar, Line, Doughnut, Pie, Scatter } from 'react-chartjs-2';
-import { BarChart3, TrendingUp, PieChart } from 'lucide-react';
+import { BarChart3, Download, Maximize2, TrendingUp, PieChart } from 'lucide-react';
 import { ChartSpec } from '../types';
+import { VisualizationModal } from './VisualizationModal';
+import { downloadCanvasAsPng } from '../utils/visualizationExport';
 
 ChartJS.register(
   CategoryScale,
@@ -36,6 +38,10 @@ interface ChartViewerProps {
 }
 
 export const ChartViewer: React.FC<ChartViewerProps> = ({ spec }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const inlineChartRef = useRef<HTMLDivElement>(null);
+  const expandedChartRef = useRef<HTMLDivElement>(null);
+
   if (!spec || !spec.data || spec.type === 'table') {
     return null;
   }
@@ -133,27 +139,82 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({ spec }) => {
     return <BarChart3 className="h-4 w-4 text-zinc-400" />;
   };
 
+  const title = spec.options?.plugins?.title?.text || `${chartType.toUpperCase()} Visualization`;
+
+  const handleDownload = () => {
+    const root = isExpanded ? expandedChartRef.current : inlineChartRef.current;
+    const canvas = root?.querySelector('canvas');
+    if (!canvas) return;
+    downloadCanvasAsPng(canvas, title);
+  };
+
+  const renderChart = (options: any = chartOptions) => (
+    <>
+      {chartType === 'line' && <Line data={enhancedData} options={options} />}
+      {chartType === 'bar' && <Bar data={enhancedData} options={options} />}
+      {chartType === 'doughnut' && <Doughnut data={enhancedData} options={options} />}
+      {chartType === 'pie' && <Pie data={enhancedData} options={options} />}
+      {chartType === 'scatter' && <Scatter data={enhancedData} options={options} />}
+    </>
+  );
+
   return (
     <div className="mt-4 mb-2 rounded-2xl overflow-hidden bg-[#1e1f20] border border-zinc-800/50 shadow-md max-w-4xl">
       <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800/50 bg-[#1e1f20]">
         <div className="flex items-center gap-2">
           {getChartIcon()}
           <span className="text-[13px] font-semibold text-zinc-300">
-            {spec.options?.plugins?.title?.text || `${chartType.toUpperCase()} Visualization`}
+            {title}
           </span>
         </div>
-        <span className="rounded bg-zinc-800/50 px-2 py-0.5 text-[10px] font-mono text-zinc-400 uppercase">
-          {chartType}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="rounded bg-zinc-800/50 px-2 py-0.5 text-[10px] font-mono text-zinc-400 uppercase">
+            {chartType}
+          </span>
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            aria-label={`Download ${title} as PNG`}
+            title="Download PNG"
+          >
+            <Download className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            aria-label={`Expand ${title}`}
+            title="Open larger canvas"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
-      <div className="h-60 sm:h-64 w-full p-4">
-        {chartType === 'line' && <Line data={enhancedData} options={chartOptions} />}
-        {chartType === 'bar' && <Bar data={enhancedData} options={chartOptions} />}
-        {chartType === 'doughnut' && <Doughnut data={enhancedData} options={chartOptions} />}
-        {chartType === 'pie' && <Pie data={enhancedData} options={chartOptions} />}
-        {chartType === 'scatter' && <Scatter data={enhancedData} options={chartOptions} />}
+      <div ref={inlineChartRef} className="h-60 sm:h-64 w-full p-4">
+        {renderChart()}
       </div>
+
+      <VisualizationModal
+        open={isExpanded}
+        title={title}
+        onClose={() => setIsExpanded(false)}
+        onDownload={handleDownload}
+      >
+        {(zoom) => (
+          <div
+            ref={expandedChartRef}
+            className="mx-auto rounded-xl border border-zinc-800 bg-[#1e1f20] p-5 shadow-2xl"
+            style={{
+              width: `${zoom * 100}%`,
+              height: `${zoom * 72}vh`,
+            }}
+          >
+            {renderChart({ ...chartOptions, animation: false })}
+          </div>
+        )}
+      </VisualizationModal>
     </div>
   );
 };

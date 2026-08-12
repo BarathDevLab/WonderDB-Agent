@@ -103,7 +103,11 @@ class SemanticCacheService:
         return f"semantic_cache:{digest}"
 
     async def get(
-        self, prompt: str, tenant_id: str = "default", similarity_threshold: float | None = None
+        self,
+        prompt: str,
+        tenant_id: str = "default",
+        similarity_threshold: float | None = None,
+        exact_only: bool = False,
     ) -> dict[str, Any] | None:
         threshold = similarity_threshold if similarity_threshold is not None else self._similarity_threshold
         exact_key = self._hash_key(prompt, tenant_id)
@@ -116,6 +120,11 @@ class SemanticCacheService:
             if data:
                 item = json.loads(data)
                 return item.get("payload", item)
+
+            # Resolved conversational prompts already encode exact prior-turn
+            # state. A merely similar entry may belong to different context.
+            if exact_only:
+                return None
 
             # ── Tier 2: vector similarity scan ──────────────────────────
             # Generate embedding only if there are cached entries to search
@@ -199,33 +208,56 @@ class SemanticCacheService:
         except Exception as exc:
             logger.error("Semantic cache delete failed: %s", exc)
 
-    async def flush_all(self) -> None:
-        try:
-            client = await get_redis_client()
-            deleted = 0
-            async for key in client.scan_iter("semantic_cache:*", count=100):
-                await client.delete(key)
-                deleted += 1
-            logger.info("Semantic cache flushed: %d keys deleted", deleted)
-        except Exception as exc:
-            logger.error("Semantic cache flush failed: %s", exc)
+    async def flush_all(self) -> dict[str, int]:
+        """Delete and verify every semantic-cache key without mutating during SCAN."""
+        client = await get_redis_client()
+        await client.ping()
+        deleted = 0
+
+        # Collect a stable SCAN result before deletion. Deleting while SCAN is
+        # advancing can cause Redis hash-table rebalancing and skipped keys.
+        # Repeat to catch entries written concurrently with a flush.
+        for _ in range(3):
+            keys = [
+                key async for key in client.scan_iter(match="semantic_cache:*", count=500)
+            ]
+            if not keys:
+                break
+            for offset in range(0, len(keys), 500):
+                deleted += int(await client.delete(*keys[offset:offset + 500]))
+
+        remaining_keys = [
+            key async for key in client.scan_iter(match="semantic_cache:*", count=500)
+        ]
+        remaining = len(remaining_keys)
+        if remaining:
+            raise RuntimeError(
+                f"Semantic cache flush verification failed: {remaining} key(s) remain."
+            )
+        logger.info("Semantic cache flushed and verified: %d keys deleted", deleted)
+        return {"deleted": deleted, "remaining": remaining}
 
 
 semantic_cache_service = SemanticCacheService()
 
 
 async def get_semantic_cache(
-    prompt: str, tenant_id: str = "default", similarity_threshold: float = 0.75
+    prompt: str,
+    tenant_id: str = "default",
+    similarity_threshold: float = 0.75,
+    exact_only: bool = False,
 ) -> dict[str, Any] | None:
-    return await semantic_cache_service.get(prompt, tenant_id, similarity_threshold)
+    return await semantic_cache_service.get(
+        prompt, tenant_id, similarity_threshold, exact_only=exact_only,
+    )
 
 
 async def delete_semantic_cache(prompt: str, tenant_id: str = "default") -> None:
     await semantic_cache_service.delete(prompt, tenant_id)
 
 
-async def flush_semantic_cache() -> None:
-    await semantic_cache_service.flush_all()
+async def flush_semantic_cache() -> dict[str, int]:
+    return await semantic_cache_service.flush_all()
 
 
 async def set_semantic_cache(
