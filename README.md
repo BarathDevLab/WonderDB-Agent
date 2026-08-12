@@ -52,14 +52,17 @@ For a data question, the application:
 
 ## Screenshots of the deployed prototype
 
-![Line Chart Query](./screenshots/line_chart.jpeg)
-![ER Diagram Query](./screenshots/er_diagram.jpeg)
-![Revenue Trend Bar Chart](./screenshots/revenue_bar_chart.jpeg)
-![Revenue Distribution Pie Chart](./screenshots/revenue_pie_chart.jpeg)
+<img width="1600" height="809" alt="image" src="https://github.com/user-attachments/assets/01402c64-9c81-4045-8d1a-7ece92facffe" />
+<img width="1600" height="808" alt="image" src="https://github.com/user-attachments/assets/0a4365ad-9342-431b-b7ec-a9d96d2aca22" />
+<img width="1600" height="810" alt="image" src="https://github.com/user-attachments/assets/93ead7ab-46ee-45de-8374-7c8751750f9c" />
+<img width="1600" height="810" alt="image" src="https://github.com/user-attachments/assets/3a335c80-39f8-4dfa-b332-47cc446df1bb" />
+
 
 ## Current architecture
 
-![Agentic Data Assistant Architecture](./architecture.png)
+<img width="1332" height="1495" alt="image" src="https://github.com/user-attachments/assets/279c9917-b15c-4c1b-86fa-863c7a6db25b" />
+
+
 
 ### Current execution model
 
