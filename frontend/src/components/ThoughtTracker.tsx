@@ -47,7 +47,7 @@ export const ThoughtTracker: React.FC<ThoughtTrackerProps> = ({ message }) => {
 
   // Animated timer for actively streaming thoughts
   React.useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     if (isStreaming && phase !== 'complete' && phase !== 'error') {
       const startTime = Date.now() - elapsedMs;
       interval = setInterval(() => {
