@@ -16,19 +16,20 @@ import asyncio
 import json
 import logging
 import sys
+import uuid as _uuid
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+import httpx
+
 # Ensure src/ is on the path so we can import agent modules
 _src_root = str(Path(__file__).resolve().parent.parent)
 if _src_root not in sys.path:
     sys.path.insert(0, _src_root)
 
-import uuid as _uuid
-import httpx
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
@@ -507,23 +508,32 @@ def generate_flowchart(
     Generate a Mermaid diagram string.
     diagram_type options:
       - 'er'       : Entity-Relationship diagram from schema FK relationships
-      - 'process'  : Flowchart TD from result rows (sequential steps)
+      - 'process'  : Semantic state, ordered-step, or agent-execution flow
       - 'decision' : Decision tree with conditional branches (bonus)
-    Returns JSON: {mermaid: str, diagram_type: str}
+    Returns JSON: {mermaid: str, diagram_type: str, process_mode: str | null}
     """
     raw_data = raw_data or []
     schema = schema or _schema_catalog
 
     if diagram_type == "er":
         mermaid = _build_er_diagram(schema)
+        process_mode = None
     elif diagram_type == "process":
-        mermaid = _build_process_flow(raw_data, title)
+        process_mode = _detect_process_mode(raw_data)
+        mermaid = _build_process_flow(raw_data, title, process_mode)
     elif diagram_type == "decision":
         mermaid = _build_decision_tree(raw_data, title)
+        process_mode = None
     else:
-        mermaid = _build_process_flow(raw_data, title)
+        diagram_type = "process"
+        process_mode = _detect_process_mode(raw_data)
+        mermaid = _build_process_flow(raw_data, title, process_mode)
 
-    return json.dumps({"mermaid": mermaid, "diagram_type": diagram_type})
+    return json.dumps({
+        "mermaid": mermaid,
+        "diagram_type": diagram_type,
+        "process_mode": process_mode,
+    })
 
 
 def _build_er_diagram(schema: list[dict[str, Any]]) -> str:
@@ -561,62 +571,139 @@ def _build_er_diagram(schema: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _build_process_flow(raw_data: list[dict[str, Any]], title: str = "") -> str:
-    """Build Mermaid flowchart TD from result rows as sequential process steps or real state transitions."""
+_FROM_STATE_ALIASES = {
+    "from_state", "from_status", "previous_state", "previous_status", "source", "source_state",
+}
+_TO_STATE_ALIASES = {
+    "to_state", "to_status", "next_state", "next_status", "new_state", "new_status", "target", "target_state",
+}
+_STEP_ORDER_ALIASES = {"step_order", "step_number", "sequence", "sequence_number", "position"}
+_STEP_LABEL_ALIASES = {"step", "step_name", "stage", "stage_name", "activity", "action"}
+
+
+def _find_key(keys: list[str], aliases: set[str]) -> str | None:
+    return next((key for key in keys if key.lower().strip() in aliases), None)
+
+
+def _detect_process_mode(raw_data: list[dict[str, Any]]) -> str:
+    """Classify process-shaped data without fuzzy substring matches."""
     if not raw_data:
-        return "flowchart TD\n  NO_DATA[No data available]"
+        return "not_applicable"
+    keys = list(dict.fromkeys(key for row in raw_data for key in row))
+    if _find_key(keys, _FROM_STATE_ALIASES) and _find_key(keys, _TO_STATE_ALIASES):
+        return "state_transitions"
+    if _find_key(keys, _STEP_ORDER_ALIASES) and _find_key(keys, _STEP_LABEL_ALIASES):
+        return "ordered_steps"
+    return "agent_pipeline"
 
-    lines = ["flowchart TD"]
-    if title:
-        lines.append(f"  TITLE[\"<b>{title}</b>\"]")    
 
-    keys = list(raw_data[0].keys())
-    
-    # Try to detect real state transitions (e.g. from previous_status to new_status)
-    from_key = next((k for k in keys if "from" in k.lower() or "prev" in k.lower()), None)
-    to_key = next((k for k in keys if k != from_key and ("to" in k.lower() or "new" in k.lower() or "status" in k.lower())), None)
-    
-    if from_key and to_key and from_key != to_key:
-        transitions = {}
-        for r in raw_data:
-            f = str(r.get(from_key) or "Start")
-            t = str(r.get(to_key) or "End")
-            transitions[(f, t)] = transitions.get((f, t), 0) + 1
-            
-        node_ids = {}
-        idx = 0
-        def get_id(n):
-            nonlocal idx
-            if n not in node_ids:
-                node_ids[n] = f"N{idx}"
-                idx += 1
-                lines.append(f"  {node_ids[n]}[\"{n}\"]")
-            return node_ids[n]
-            
-        for (f, t), count in transitions.items():
-            lines.append(f"  {get_id(f)} -->|Count: {count}| {get_id(t)}")
-            
+def _mermaid_label(value: Any, max_length: int = 72) -> str:
+    """Create a compact label safe for a quoted Mermaid node."""
+    text = " ".join(str(value).replace('"', "'").split())
+    return text if len(text) <= max_length else text[:max_length - 3].rstrip() + "..."
+
+
+def _build_process_flow(
+    raw_data: list[dict[str, Any]],
+    title: str = "",
+    mode: str | None = None,
+) -> str:
+    """Build a semantic state, ordered-stage, or agent-execution flow."""
+    if not raw_data:
+        return "flowchart TD\n  NOT_APPLICABLE[No process or query data available]"
+
+    keys = list(dict.fromkeys(key for row in raw_data for key in row))
+    mode = mode or _detect_process_mode(raw_data)
+
+    if mode == "state_transitions":
+        from_key = _find_key(keys, _FROM_STATE_ALIASES)
+        to_key = _find_key(keys, _TO_STATE_ALIASES)
+        count_key = next((key for key in keys if key.lower() in {"count", "transition_count", "total"}), None)
+        assert from_key and to_key
+        transitions: dict[tuple[str, str], float] = {}
+        for row in raw_data:
+            source = _mermaid_label(row.get(from_key) or "Start")
+            target = _mermaid_label(row.get(to_key) or "End")
+            try:
+                weight = float(row.get(count_key, 1) or 1) if count_key else 1.0
+            except (TypeError, ValueError):
+                weight = 1.0
+            transitions[(source, target)] = transitions.get((source, target), 0.0) + weight
+
+        lines = ["flowchart LR"]
+        node_ids: dict[str, str] = {}
+
+        def get_id(label: str) -> str:
+            if label not in node_ids:
+                node_ids[label] = f"S{len(node_ids)}"
+                lines.append(f'  {node_ids[label]}["{label}"]')
+            return node_ids[label]
+
+        for (source, target), count in transitions.items():
+            count_label = int(count) if count.is_integer() else round(count, 2)
+            lines.append(f"  {get_id(source)} -->|{count_label}| {get_id(target)}")
+        lines.append("  classDef state fill:#172554,stroke:#6366f1,color:#f4f4f5")
+        lines.append(f"  class {','.join(node_ids.values())} state")
         return "\n".join(lines)
 
-    # Fallback to linear flow
-    label_key = next((k for k in keys if isinstance(raw_data[0][k], str)), keys[0])
-    value_key = next((k for k in keys if isinstance(raw_data[0][k], (int, float))), None)
+    if mode == "ordered_steps":
+        order_key = _find_key(keys, _STEP_ORDER_ALIASES)
+        label_key = _find_key(keys, _STEP_LABEL_ALIASES)
+        assert order_key and label_key
+        owner_key = next((key for key in keys if key.lower() in {"owner", "assignee", "actor", "team"}), None)
+        duration_key = next((key for key in keys if "duration" in key.lower()), None)
+        def order_value(row: dict[str, Any]) -> tuple[bool, float, str]:
+            value = row.get(order_key)
+            try:
+                return value is None, float(value), ""
+            except (TypeError, ValueError):
+                return value is None, float("inf"), str(value or "")
 
-    prev_id = None
-    for i, row in enumerate(raw_data[:15]):  # cap at 15 nodes
-        node_id = f"N{i}"
-        label = str(row.get(label_key, f"Step {i+1}"))
-        if value_key:
-            val = row.get(value_key, "")
-            node_def = f"  {node_id}[\"{label}\\n{value_key}: {val}\"]"
-        else:
-            node_def = f"  {node_id}[\"{label}\"]"
-        lines.append(node_def)
-        if prev_id:
-            lines.append(f"  {prev_id} --> {node_id}")
-        prev_id = node_id
+        ordered = sorted(raw_data, key=order_value)[:20]
+        lines = ["flowchart LR", "  START([Start])"]
+        previous = "START"
+        for index, row in enumerate(ordered):
+            details = [_mermaid_label(row.get(label_key) or f"Step {index + 1}")]
+            if owner_key and row.get(owner_key):
+                details.append(f"Owner: {_mermaid_label(row[owner_key], 32)}")
+            if duration_key and row.get(duration_key):
+                details.append(f"Duration: {_mermaid_label(row[duration_key], 24)}")
+            node_id = f"STEP{index}"
+            label = "<br/>".join(details)
+            lines.append(f'  {node_id}["{label}"]')
+            lines.append(f"  {previous} --> {node_id}")
+            previous = node_id
+        lines.extend([f"  {previous} --> DONE([Complete])", "  classDef terminal fill:#064e3b,stroke:#10b981,color:#f4f4f5"])
+        lines.append("  class START,DONE terminal")
+        return "\n".join(lines)
 
-    return "\n".join(lines)
+    # Analytical rows are not business-process stages. Show the actual agent
+    # workflow used to produce the requested analysis instead of chaining rows.
+    request_label = _mermaid_label(title or "Analyze database request", 64)
+    row_count = len(raw_data)
+    return "\n".join([
+        "flowchart LR",
+        f'  START(["Request: {request_label}"])',
+        '  SCHEMA["Discover relevant schema"]',
+        '  SQL["Generate read-only SQL"]',
+        '  SAFETY{"AST and cost checks pass?"}',
+        '  EXEC[("Execute tenant-scoped query")]',
+        f'  ANALYZE["Analyze {row_count} returned rows"]',
+        '  VIS["Generate requested visualizations"]',
+        '  EXPLAIN["Explain grounded findings"]',
+        '  VERIFY{"All requested outputs delivered?"}',
+        '  REPAIR["Repair failed task"]',
+        '  DONE(["Return verified response"])',
+        "  START --> SCHEMA --> SQL --> SAFETY",
+        "  SAFETY -->|Yes| EXEC --> ANALYZE --> VIS --> EXPLAIN --> VERIFY",
+        "  SAFETY -->|No| REPAIR --> SQL",
+        "  VERIFY -->|No| REPAIR",
+        "  VERIFY -->|Yes| DONE",
+        "  classDef terminal fill:#064e3b,stroke:#10b981,color:#f4f4f5",
+        "  classDef decision fill:#422006,stroke:#f59e0b,color:#f4f4f5",
+        "  class START,DONE terminal",
+        "  class SAFETY,VERIFY decision",
+    ])
 
 
 def _build_decision_tree(raw_data: list[dict[str, Any]], title: str = "") -> str:
@@ -643,7 +730,8 @@ def _build_decision_tree(raw_data: list[dict[str, Any]], title: str = "") -> str
         
         # Aggregate decisions
         def agg_decision(subset):
-            if not subset: return "Unknown"
+            if not subset:
+                return "Unknown"
             counts = {}
             for r in subset:
                 d = str(r.get(decision_key, "Unknown"))

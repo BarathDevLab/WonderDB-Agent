@@ -118,7 +118,7 @@ The MCP server exposes the five required hackathon tools plus grounded analytics
 | `get_schema` | None | Tables, columns, primary keys, and foreign keys | Discovers the live PostgreSQL schema for retrieval and ER diagrams. |
 | `execute_query` | `sql`, `tenant_id` | Rows, query cost, or an error | Validates, limits, estimates, executes, and redacts a PostgreSQL query. |
 | `generate_chart` | Rows, chart type | Chart.js configuration | Builds `bar`, `line`, `pie`, or `scatter` chart specs. |
-| `generate_flowchart` | Diagram type, schema or rows | Mermaid definition | Produces `er`, `process`, or `decision` diagrams. |
+| `generate_flowchart` | Diagram type, schema or rows | Mermaid definition | Produces ER, decision, and semantic process diagrams (state transitions, ordered steps, or the agent execution/recovery workflow). |
 | `explain_data` | Prompt, rows | Summary and metrics | Explains query data in plain language using Gemini, with a deterministic fallback message. |
 | `analyze_data` | Rows, optional analysis types | Verified metrics and findings | Deterministically calculates summaries, trends, contributors, IQR outliers, data quality, and a recommended chart before narrative generation. |
 | `verify_response` | Plan, SQL, rows, visuals, summary, analysis, tool log | Completion report | Compares requested and delivered artifacts, detects partial/failing responses, and reports warnings before the final answer is returned. |

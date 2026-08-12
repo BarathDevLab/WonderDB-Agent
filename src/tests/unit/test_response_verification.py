@@ -80,3 +80,35 @@ def test_verifier_rejects_placeholder_er_diagram() -> None:
 
     assert result["verified"] is False
     assert result["missing_artifacts"] == ["schema_context", "er_diagram"]
+
+
+def test_verifier_requires_semantic_process_mode() -> None:
+    common = {
+        "supervisor_plan": {
+            "intent": "query",
+            "visualizations": ["process_flow"],
+            "needs_explanation": False,
+        },
+        "sql_query": "SELECT month, revenue FROM monthly_revenue",
+        "raw_data": [{"month": "2026-01", "revenue": 100}],
+        "data_analysis": {"row_count": 1, "data_quality": {}},
+    }
+
+    invalid = verify_agent_response(
+        **common,
+        visualizations=[{
+            "diagram_type": "process",
+            "mermaid": "flowchart TD\n  A --> B",
+        }],
+    )
+    valid = verify_agent_response(
+        **common,
+        visualizations=[{
+            "diagram_type": "process",
+            "process_mode": "agent_pipeline",
+            "mermaid": "flowchart LR\n  REQUEST --> VERIFY",
+        }],
+    )
+
+    assert invalid["missing_artifacts"] == ["process_flow"]
+    assert valid["verified"] is True

@@ -73,7 +73,18 @@ def verify_agent_response(
             delivered.add(f"{chart_type}_chart")
         diagram_type = visual.get("diagram_type")
         mermaid = visual.get("mermaid", "")
-        diagram_is_real = mermaid and "NO_SCHEMA_LOADED" not in mermaid and "NO_DATA" not in mermaid
+        diagram_is_real = (
+            mermaid
+            and "NO_SCHEMA_LOADED" not in mermaid
+            and "NO_DATA" not in mermaid
+            and "NOT_APPLICABLE" not in mermaid
+        )
+        if diagram_type == "process":
+            diagram_is_real = diagram_is_real and visual.get("process_mode") in {
+                "state_transitions",
+                "ordered_steps",
+                "agent_pipeline",
+            }
         if diagram_type in _DIAGRAM_TYPES and diagram_is_real:
             delivered.add({
                 "er": "er_diagram",

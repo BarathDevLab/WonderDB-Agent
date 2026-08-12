@@ -55,9 +55,10 @@ Visualizations: Select chart types that best fit the data shape:
   • Comparison across groups   → "bar_chart"
   • Part-of-whole distribution → "pie_chart"
   • Two numeric dimensions     → "scatter_chart"
-  • Complex transitions        → "process_flow"
+  • Explicit process/workflow request → "process_flow"
   • Hierarchical splits        → "decision_tree"
   Only include a chart type if it genuinely adds insight.
+  Never infer a process flow from ordinary time-series or category result rows.
   Empty list [] is valid when the data is best shown as a table.
 needs_explanation: true
 
