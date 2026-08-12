@@ -5,24 +5,26 @@ flowchart TD
     subgraph LangGraph Orchestrator
         API --> CacheGate{Semantic Cache Gate<br/>Redis VSS}
         CacheGate -->|Hit| FastReturn[Fast Return]
-        CacheGate -->|Miss| Plan[Node 1: plan_node<br/>Schema RAG + SQL Gen]
-        Plan --> SchemaRAG[Dynamic Schema RAG<br/>pgvector]
+        CacheGate -->|Miss| Plan[Node 1: plan_node]
         Plan --> Execute[Node 2: execute_node]
         Execute --> Reflect[Node 3: reflect_node]
         Reflect -->|Retry| Plan
         Execute --> Summarize[Node 4: summarize_node]
     end
 
-    subgraph Security & Execution Gateway
-        Execute --> AST[SQL AST Validator]
-        AST --> CostGate[Query Cost Evaluator]
-        CostGate --> PII[PII Masking]
+    subgraph FastMCP [MCP Tool Server]
+        Plan -.->|get_schema| MCPSchema[Schema Context]
+        Execute -.->|execute_query| MCPExec[Execute Query]
+        Summarize -.->|generate_chart| MCPChart[Chart Config]
+        Summarize -.->|generate_flowchart| MCPFlow[Mermaid Diagram]
+        Summarize -.->|explain_data| MCPExplain[Plain Text Explanation]
+        Summarize -.->|analyze_data| MCPAnalyze[Grounded Analytics]
+        Summarize -.->|verify_response| MCPVerify[Final Verification]
         
-        PII -->|Async Path| WorkerQueue[Background Worker Queue]
-        PII -->|Sync Path| Sandbox[Database Execution Sandbox<br/>PgBouncer Pool]
-        
+        MCPExec --> Guardrails[AST Validation + Cost Gate + PII Masking]
+        Guardrails --> Sandbox[PgBouncer Pool]
         Sandbox --> Postgres[(PostgreSQL Replica)]
+        MCPSchema --> Postgres
     end
     
     CacheGate --> Redis[(Redis Engine)]
-    SchemaRAG --> Postgres
