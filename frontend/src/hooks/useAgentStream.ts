@@ -286,6 +286,7 @@ export function useAgentStream(initialTenantId: string) {
                   ...workingAgentMsg,
                   summary: data.summary || '',
                   chartSpec: data.chart_spec,
+                  chartSpecs: data.chart_specs || (data.chart_spec ? [data.chart_spec] : []),
                   diagramSpec: data.diagram_spec,
                   toolCalls: data.tool_calls,
                 };

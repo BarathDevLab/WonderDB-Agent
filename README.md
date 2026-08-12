@@ -4,7 +4,7 @@
 
 AI Database Agent is an end-to-end Text-to-SQL application. A React chat interface sends a request to a FastAPI service, where a LangGraph workflow retrieves schema context, asks Gemini to generate a safe PostgreSQL `SELECT`, executes it through an MCP tool server, and streams the result back to the browser over Server-Sent Events (SSE).
 
-The project includes multi-tenant sample data, query validation, query cost checks, PII masking, semantic caching, session memory, charts, and ER diagrams.
+The project includes seven agent tools, multi-tenant sample data, query validation, query cost checks, deterministic analytics, response verification, PII masking, semantic caching, session memory, charts, and ER diagrams.
 
 ## Contents
 
@@ -71,6 +71,8 @@ flowchart TD
     subgraph MCP tool server
         Execute --> SQLTool[execute_query]
         Summarize --> ExplainTool[explain_data]
+        Summarize --> AnalyzeTool[analyze_data]
+        Summarize --> VerifyTool[verify_response]
         Summarize --> ChartTool[generate_chart]
         Summarize --> DiagramTool[generate_flowchart]
         SQLTool --> Guardrails[AST validation + cost gate + PII redaction]
@@ -83,7 +85,7 @@ flowchart TD
 
 ### Current execution model
 
-The present implementation is a controlled workflow agent, not yet a general multi-task DAG agent. Each prompt is classified into one primary route: `query`, `schema`, `chat`, or `contextual`. It can combine a query with an explanation and one chart, but a request with several independent deliverables—such as a trend analysis, ER diagram, and process diagram—cannot be guaranteed to produce all outputs in one turn.
+The implementation is a controlled workflow agent with parallel artifact workers. Each prompt has one primary route—`query`, `schema`, `chat`, or `contextual`—but every explicitly requested chart and diagram is preserved, dispatched, returned, rendered, and checked by `verify_response`. It is not yet a general DAG capable of planning several independent SQL queries in one turn.
 
 The planned evolution is a task-and-artifact architecture: decompose a request into several tool tasks, execute dependency-ready tasks, record each table/chart/diagram as an artifact, recover individual failures with bounded retries, and verify that every requested artifact was delivered.
 
@@ -101,13 +103,15 @@ The planned evolution is a task-and-artifact architecture: decompose a request i
 - SQLGlot SELECT-only validation and multi-statement rejection.
 - `EXPLAIN` cost threshold, timeout, and row-limit controls.
 - PII masking by sensitive column name and common value patterns.
+- Deterministic totals, averages, trends, outliers, contributors, and data-quality checks.
+- Final requested-versus-delivered verification with explicit partial-result disclosure.
 - Redis-backed semantic cache and session event history with in-memory fallbacks.
 - Multi-tenant PostgreSQL seed data and RLS policy definitions.
 - Session history stored in the browser, with Markdown export.
 
 ## Required tool reference
 
-The MCP server exposes the five required tools in [`src/mcp_server/server.py`](src/mcp_server/server.py).
+The MCP server exposes the five required hackathon tools plus grounded analytics and final response verification in [`src/mcp_server/server.py`](src/mcp_server/server.py).
 
 | Tool | Input | Output | Purpose |
 |---|---|---|---|
@@ -116,6 +120,8 @@ The MCP server exposes the five required tools in [`src/mcp_server/server.py`](s
 | `generate_chart` | Rows, chart type | Chart.js configuration | Builds `bar`, `line`, `pie`, or `scatter` chart specs. |
 | `generate_flowchart` | Diagram type, schema or rows | Mermaid definition | Produces `er`, `process`, or `decision` diagrams. |
 | `explain_data` | Prompt, rows | Summary and metrics | Explains query data in plain language using Gemini, with a deterministic fallback message. |
+| `analyze_data` | Rows, optional analysis types | Verified metrics and findings | Deterministically calculates summaries, trends, contributors, IQR outliers, data quality, and a recommended chart before narrative generation. |
+| `verify_response` | Plan, SQL, rows, visuals, summary, analysis, tool log | Completion report | Compares requested and delivered artifacts, detects partial/failing responses, and reports warnings before the final answer is returned. |
 
 ## Supported outputs
 
@@ -127,8 +133,8 @@ The MCP server exposes the five required tools in [`src/mcp_server/server.py`](s
 | Pie chart | Yes | Yes | Supported end to end. |
 | Scatter chart | Yes | Not currently rendered | The MCP tool can generate it, but the current React renderer does not include a scatter branch. |
 | ER diagram | Yes | Yes | Generated from schema foreign-key metadata and rendered with Mermaid. |
-| Process flow | Yes | Partially routed | The tool supports it, but current planner routing prioritizes ER-style schema output. |
-| Decision tree | Yes | Partially routed | The tool supports it; dedicated request planning is still needed. |
+| Process flow | Yes | Yes | Generated from query-result transition or sequential data. |
+| Decision tree | Yes | Yes | Generated from compatible result data. |
 
 ## Repository structure
 
@@ -331,7 +337,7 @@ SSE events:
 | `plan_ready` | Planning completed | `strategy`, `sql` |
 | `execution_complete` | Database query completed | `rows`, `data`, `cost` |
 | `reflection_retry` | SQL retry initiated | `error`, `retry` |
-| `final_response` | Final agent result | `summary`, `chart_spec`, `diagram_spec`, `tool_calls` |
+| `final_response` | Final agent result | `summary`, `chart_specs`, `diagram_spec`, `visualizations`, `response_verification`, `tool_calls` |
 | `error` | Stream-level failure | `message` |
 | `complete` | Stream has ended | `ok` |
 
@@ -394,9 +400,9 @@ The source already contains the building blocks for a stronger agent, but these 
 
 | Area | Current behavior | Recommended next step |
 |---|---|---|
-| Multi-task requests | One primary intent controls the workflow. A single request cannot reliably guarantee several independent outputs. | Introduce a structured task plan, dependency-aware executor, artifact registry, and completion verifier. |
+| Multi-task requests | One query can fan out to every requested chart/diagram plus analysis, explanation, and verification. Several independent SQL questions still share one SQL execution. | Introduce a general task DAG when multiple independent queries per turn are required. |
 | Agent recovery | SQL failures can be reflected and retried up to three times. | Add typed, bounded recovery for individual tool failures, transient API errors, and incomplete plans. |
-| Output model | State has one `chart_spec` and one `diagram_spec`. | Return an ordered artifact list so one response can include several charts, diagrams, tables, and explanations. |
+| Output model | SSE returns complete `chart_specs`, diagram, and `visualizations` collections while retaining legacy `chart_spec`. | Formalize all non-visual outputs into the same typed artifact registry. |
 | Scatter charts | Generated by backend but not rendered in the current UI. | Add `Scatter` support in `ChartViewer` and TypeScript chart types. |
 | Diagram routing | ER output is supported; process/decision flows are not consistently selected. | Add explicit diagram task types and permit multiple diagram artifacts. |
 | Session boundaries | Browser sessions are local; the frontend does not currently send its session ID to the backend. | Pass and persist server-side session IDs for turn-specific context. |
@@ -464,4 +470,4 @@ Then run `npm install` and `npm run dev` from `frontend/`.
 
 ## Project status
 
-This project is a feature-rich Text-to-SQL prototype with a polished streaming interface and a solid tool boundary. The next architectural milestone is to move from its current fixed routing workflow to a bounded, multi-task agent that plans, executes, recovers, verifies, and returns multiple artifacts per user request.
+This project is a feature-rich Text-to-SQL agent with parallel visualization generation, deterministic analysis, bounded SQL recovery, and final response verification. The next architectural milestone is a general task DAG for requests that require multiple independent SQL executions and dependent follow-up tasks.

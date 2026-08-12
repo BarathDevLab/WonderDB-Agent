@@ -24,7 +24,7 @@ export interface ChartSpec {
     labels: string[];
     datasets: {
       label: string;
-      data: number[];
+      data: (number | null)[] | { x: number; y: number }[];
       backgroundColor?: string | string[];
       borderColor?: string | string[];
       borderWidth?: number;
@@ -43,6 +43,7 @@ export interface ToolCall {
   tool: string;
   status: string;
   duration_ms?: number;
+  attempts?: number;
 }
 
 export interface ChatMessage {
@@ -59,6 +60,7 @@ export interface ChatMessage {
   rawResults?: Record<string, any>[];
   summary?: string;
   chartSpec?: ChartSpec;
+  chartSpecs?: ChartSpec[];
   diagramSpec?: DiagramSpec[];
   toolCalls?: ToolCall[];
   errorMessage?: string;

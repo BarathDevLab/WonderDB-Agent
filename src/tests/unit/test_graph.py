@@ -111,3 +111,24 @@ def test_dynamic_viz_routing_sends_chart() -> None:
     assert len(result) == 1
     assert isinstance(result[0], Send)
     assert result[0].node == "chart_worker"
+
+
+def test_dynamic_viz_routing_dispatches_every_requested_visualization() -> None:
+    state: GlobalState = {
+        "has_fatal_error": False,
+        "supervisor_plan": {
+            "intent": "query",
+            "visualizations": ["line_chart", "bar_chart", "pie_chart", "er_diagram"],
+            "needs_explanation": True,
+        },
+        "clean_dataset": [{"month": "Jan", "product": "Keyboard", "revenue": 100}],
+        "retrieved_schemas": [],
+        "prompt": "Create three charts and an ER diagram",
+    }
+
+    result = dynamic_viz_routing(state)
+
+    assert isinstance(result, list)
+    assert [send.node for send in result] == [
+        "chart_worker", "chart_worker", "chart_worker", "er_worker",
+    ]

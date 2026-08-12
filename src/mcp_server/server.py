@@ -1,12 +1,14 @@
 """
 MCP Server — AI Database Agent Tools
 =====================================
-Exposes 5 tools via FastMCP (stdio transport):
+Exposes 7 tools via FastMCP (stdio transport):
   1. get_schema       — fetch raw DB schema from information_schema
   2. execute_query    — validate + execute SQL with RLS, cost gate, PII redact
   3. generate_chart   — build Chart.js spec (bar/line/pie/scatter)
   4. generate_flowchart — build Mermaid diagram (er/process/decision)
   5. explain_data     — Gemini LLM plain-language summary
+  6. analyze_data     — deterministic metrics, trends, outliers, and quality checks
+  7. verify_response  — confirm all planned artifacts were delivered
 """
 from __future__ import annotations
 
@@ -286,7 +288,11 @@ async def execute_query(sql: str, tenant_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def generate_chart(raw_data: list[dict[str, Any]], chart_type: str = "auto") -> str:
+def generate_chart(
+    raw_data: list[dict[str, Any]],
+    chart_type: str = "auto",
+    request: str = "",
+) -> str:
     """
     Generate a Chart.js configuration from query results.
     Supported chart_type values: auto, bar, line, pie, scatter.
@@ -300,34 +306,62 @@ def generate_chart(raw_data: list[dict[str, Any]], chart_type: str = "auto") -> 
     if not raw_data:
         return json.dumps({"type": "empty", "data": {}, "options": {}})
 
-    first_row = raw_data[0]
-    keys = list(first_row.keys())
-    label_key = next((k for k in keys if isinstance(first_row[k], str)), keys[0])
-    numeric_keys = [k for k in keys if isinstance(first_row[k], (int, float))]
+    keys = list(dict.fromkeys(key for row in raw_data for key in row))
+    numeric_keys = [
+        key for key in keys
+        if any(isinstance(row.get(key), (int, float)) and not isinstance(row.get(key), bool)
+               for row in raw_data)
+    ]
+    text_keys = [
+        key for key in keys
+        if key not in numeric_keys and any(row.get(key) is not None for row in raw_data)
+    ]
+    time_key = next(
+        (key for key in text_keys
+         if any(token in key.lower() for token in ("date", "time", "month", "year", "week", "day", "quarter"))),
+        None,
+    )
+    category_keys = [key for key in text_keys if key != time_key]
+    label_key = time_key or (text_keys[0] if text_keys else keys[0])
 
     if not numeric_keys:
         return json.dumps({"type": "table", "columns": keys, "data": raw_data})
 
     # Auto-detect chart type
     if chart_type == "auto":
-        if len(numeric_keys) >= 2:
-            chart_type = "scatter"
-        elif any(w in label_key.lower() for w in ["month", "date", "year", "time", "week", "day"]):
+        if time_key:
             chart_type = "line"
-        elif len(raw_data) <= 8 and isinstance(first_row.get(label_key), str):
+        elif len(numeric_keys) >= 2 and not text_keys:
+            chart_type = "scatter"
+        elif len(raw_data) <= 8 and text_keys:
             chart_type = "pie"
         else:
             chart_type = "bar"
 
-    labels = [str(r.get(label_key, f"Row {i}")) for i, r in enumerate(raw_data)]
     value_key = numeric_keys[0]
-    data_points = [float(r.get(value_key, 0)) for r in raw_data]
+
+    def display_label(value: Any) -> str:
+        text = str(value)
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.day == 1:
+                return parsed.strftime("%b %Y")
+            return parsed.strftime("%d %b %Y")
+        except (ValueError, TypeError):
+            return text
 
     # Color palettes per type
     _PIE_COLORS = [
         "rgba(99,102,241,0.85)", "rgba(168,85,247,0.85)", "rgba(236,72,153,0.85)",
         "rgba(20,184,166,0.85)", "rgba(245,158,11,0.85)", "rgba(239,68,68,0.85)",
         "rgba(34,197,94,0.85)", "rgba(59,130,246,0.85)",
+    ]
+    _SERIES_COLORS = [
+        ("rgba(99,102,241,1)", "rgba(99,102,241,0.18)"),
+        ("rgba(20,184,166,1)", "rgba(20,184,166,0.18)"),
+        ("rgba(245,158,11,1)", "rgba(245,158,11,0.18)"),
+        ("rgba(236,72,153,1)", "rgba(236,72,153,0.18)"),
+        ("rgba(59,130,246,1)", "rgba(59,130,246,0.18)"),
     ]
 
     if chart_type == "scatter" and len(numeric_keys) >= 2:
@@ -352,6 +386,61 @@ def generate_chart(raw_data: list[dict[str, Any]], chart_type: str = "auto") -> 
             },
         })
 
+    # A temporal dimension plus a category (month + product, for example)
+    # becomes one line per category. Missing points remain null rather than
+    # being presented as real zero values.
+    if chart_type == "line" and time_key and category_keys:
+        series_key = category_keys[0]
+        raw_labels = list(dict.fromkeys(row.get(time_key) for row in raw_data if row.get(time_key) is not None))
+        series_names = list(dict.fromkeys(
+            str(row.get(series_key)) for row in raw_data if row.get(series_key) is not None
+        ))
+        totals: dict[tuple[str, Any], float] = {}
+        for row in raw_data:
+            if row.get(time_key) is None or row.get(series_key) is None:
+                continue
+            try:
+                key = (str(row[series_key]), row[time_key])
+                totals[key] = totals.get(key, 0.0) + float(row.get(value_key, 0) or 0)
+            except (TypeError, ValueError):
+                continue
+        datasets = []
+        for index, series_name in enumerate(series_names):
+            border, background = _SERIES_COLORS[index % len(_SERIES_COLORS)]
+            datasets.append({
+                "label": series_name,
+                "data": [totals.get((series_name, raw_label)) for raw_label in raw_labels],
+                "backgroundColor": background,
+                "borderColor": border,
+                "borderWidth": 2,
+                "fill": False,
+                "tension": 0.3,
+            })
+        return json.dumps({
+            "type": "line",
+            "data": {"labels": [display_label(label) for label in raw_labels], "datasets": datasets},
+            "options": {
+                "responsive": True,
+                "plugins": {
+                    "legend": {"position": "top"},
+                    "title": {"display": True, "text": f"{value_key.replace('_', ' ').title()} Trend"},
+                },
+            },
+        })
+
+    # Bar and pie charts aggregate a non-temporal category across repeated
+    # rows, so a product-total comparison does not repeat every month label.
+    aggregate_key = category_keys[0] if category_keys else label_key
+    aggregate_totals: dict[str, float] = {}
+    for index, row in enumerate(raw_data):
+        label = display_label(row.get(aggregate_key, f"Row {index + 1}"))
+        try:
+            aggregate_totals[label] = aggregate_totals.get(label, 0.0) + float(row.get(value_key, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+    labels = list(aggregate_totals)
+    data_points = list(aggregate_totals.values())
+
     if chart_type == "pie":
         return json.dumps({
             "type": "pie",
@@ -360,7 +449,7 @@ def generate_chart(raw_data: list[dict[str, Any]], chart_type: str = "auto") -> 
                 "datasets": [{
                     "label": value_key.replace("_", " ").title(),
                     "data": data_points,
-                    "backgroundColor": _PIE_COLORS[:len(labels)],
+                    "backgroundColor": [_PIE_COLORS[i % len(_PIE_COLORS)] for i in range(len(labels))],
                     "borderWidth": 2,
                 }]
             },
@@ -373,7 +462,7 @@ def generate_chart(raw_data: list[dict[str, Any]], chart_type: str = "auto") -> 
             },
         })
 
-    # bar / line shared structure
+    # Single-series bar / line structure.
     bg_color = "rgba(99,102,241,0.7)" if chart_type == "bar" else "rgba(168,85,247,0.3)"
     border_color = "rgba(99,102,241,1)" if chart_type == "bar" else "rgba(168,85,247,1)"
     dataset: dict[str, Any] = {
@@ -394,7 +483,10 @@ def generate_chart(raw_data: list[dict[str, Any]], chart_type: str = "auto") -> 
             "responsive": True,
             "plugins": {
                 "legend": {"position": "top"},
-                "title": {"display": True, "text": f"{value_key.replace('_', ' ').title()} Overview"},
+                "title": {
+                    "display": True,
+                    "text": request[:80] if request else f"{value_key.replace('_', ' ').title()} Overview",
+                },
             },
         },
     })
@@ -666,6 +758,69 @@ async def explain_data(prompt: str, raw_results: list[dict[str, Any]]) -> str:
 
     fallback = f"Query returned {len(raw_results)} rows for: {prompt[:80]}"
     return json.dumps({"summary": fallback, "key_metrics": []})
+
+
+# ---------------------------------------------------------------------------
+# Tool 6: analyze_data
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def analyze_data(
+    raw_data: list[dict[str, Any]],
+    analysis_types: list[str] | None = None,
+) -> str:
+    """
+    Compute grounded analytics without an LLM.
+
+    Supported analysis_types: summary, trend, outliers, quality, contributors.
+    If omitted, all analyses run. Returns JSON containing numeric summaries,
+    period change, top contributors, IQR outliers, data-quality observations,
+    and a recommended chart type.
+    """
+    from services import analyze_rows
+
+    return json.dumps(analyze_rows(raw_data, analysis_types), default=str)
+
+
+# ---------------------------------------------------------------------------
+# Tool 7: verify_response
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def verify_response(
+    supervisor_plan: dict[str, Any],
+    sql_query: str = "",
+    raw_data: list[dict[str, Any]] | None = None,
+    visualizations: list[dict[str, Any]] | None = None,
+    summary: str = "",
+    data_analysis: dict[str, Any] | None = None,
+    tool_calls: list[dict[str, Any]] | None = None,
+    schema_available: bool = False,
+    fatal_error: str = "",
+    original_prompt: str = "",
+) -> str:
+    """
+    Verify response completeness against the supervisor's execution plan.
+
+    Returns requested, delivered, and missing artifacts; failed tool and
+    data-quality warnings; a completion ratio; and complete/partial/failed
+    status. This tool is deterministic and performs no LLM calls.
+    """
+    from services import verify_agent_response
+
+    result = verify_agent_response(
+        supervisor_plan=supervisor_plan,
+        sql_query=sql_query,
+        raw_data=raw_data,
+        visualizations=visualizations,
+        summary=summary,
+        data_analysis=data_analysis,
+        tool_calls=tool_calls,
+        schema_available=schema_available,
+        fatal_error=fatal_error,
+        original_prompt=original_prompt,
+    )
+    return json.dumps(result, default=str)
 
 
 # ---------------------------------------------------------------------------

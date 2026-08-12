@@ -26,6 +26,8 @@ class GlobalState(TypedDict, total=False):
     # ── Set by sql_engine wrapper ─────────────────────────────────────────
     clean_dataset: list[dict[str, Any]]
     sql_query: str          # Kept for caching / history / explain context
+    data_analysis: dict[str, Any]  # Deterministic metrics produced by analyze_data
+    response_verification: dict[str, Any]  # Final requested-vs-delivered artifact check
 
     # ── Error sentinel (replaces fragile string-prefix matching) ─────────
     has_fatal_error: bool   # True when sql_engine encountered unrecoverable failure

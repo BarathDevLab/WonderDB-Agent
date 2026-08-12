@@ -4,10 +4,11 @@ synthesize_node.py
 Runs after all parallel map-reduce workers complete.
 Responsibilities:
   1. Detect and surface fatal SQL errors gracefully
-  2. Optionally call explain_data MCP tool to generate a rich narrative
-  3. Write the final result to semantic cache
-  4. Append the completed interaction to session memory
-  5. Return ONLY the delta fields (not the full state)
+  2. Call analyze_data to compute grounded metrics
+  3. Optionally call explain_data MCP tool to generate a rich narrative
+  4. Call verify_response to detect missing or failed deliverables
+  5. Write the final result to semantic cache and session memory
+  6. Return ONLY the delta fields (not the full state)
 
 Bug fixes applied:
   - tool_calls no longer mutated in-place (was breaking LangGraph's immutability contract)
@@ -43,6 +44,7 @@ def _build_explain_prompt(
     has_chart: bool,
     raw_results: list[dict[str, Any]],
     retrieved_schemas: list[dict[str, Any]],
+    data_analysis: dict[str, Any] | None = None,
 ) -> str:
     """Build a rich, context-aware prompt for the explain_data MCP tool."""
     _DIAGRAM_LABELS = {
@@ -76,9 +78,13 @@ Relevant tables involved: {schema_context}
 **Data Results:**
 {f"Query returned {len(raw_results)} rows of data." if raw_results else "No data returned."}
 
+**Verified Deterministic Analysis:**
+{json.dumps(data_analysis, default=str) if data_analysis else "No computed analysis available."}
+
 **Strict Output Rules:**
 1. You MUST format your response exactly using the Markdown template below. Do not deviate from this structure.
-2. DO NOT explain the database schema or ER diagrams unless the user explicitly asked how the database works. Focus strictly on the data and business insights.
+2. Treat the verified deterministic analysis as the source of truth for all calculations. Do not invent or recalculate metrics.
+3. DO NOT explain the database schema or ER diagrams unless the user explicitly asked how the database works. Focus strictly on the data and business insights.
 
 **Mandatory Markdown Template to use for your response:**
 ### **Executive Performance Summary**
@@ -121,6 +127,8 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
         summary = state.get("summary", "")
         return {
             "summary": summary,
+            "data_analysis": state.get("data_analysis", {}),
+            "response_verification": state.get("response_verification", {}),
             "current_phase": "complete",
         }
 
@@ -143,12 +151,37 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
             f"Details: {error_detail}" if error_detail else
             "I wasn't able to execute that query. Please try rephrasing or simplifying."
         )
+        verification: dict[str, Any] = {}
+        verification_calls: list[dict[str, Any]] = []
+        try:
+            verification_session = await get_mcp_session()
+            t0 = time.monotonic()
+            verification = await _call_tool(verification_session, "verify_response", {
+                "supervisor_plan": plan,
+                "summary": friendly,
+                "schema_available": bool(retrieved_schemas),
+                "fatal_error": error_detail or "Query execution failed.",
+                "original_prompt": prompt,
+                "tool_calls": state.get("tool_calls", []),
+            })
+            duration_ms = round((time.monotonic() - t0) * 1000, 1)
+            verification_calls.append({
+                "tool": "verify_response", "status": "done", "duration_ms": duration_ms,
+            })
+        except Exception as exc:
+            logger.warning("verify_response tool failed on fatal path: %s", exc)
+            verification_calls.append({
+                "tool": "verify_response", "status": "error", "duration_ms": 0,
+            })
         await append_session_event(session_id, {
             "phase": "summary", "prompt": prompt, "sql_query": sql_query,
             "summary": friendly, "error": error_detail,
+            "verification_status": verification.get("status", "unavailable"),
         })
         return {
             "summary": friendly,
+            "response_verification": verification,
+            "tool_calls": verification_calls,
             "current_phase": "complete",
         }
 
@@ -159,7 +192,8 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
     extra_tool_calls: list[dict[str, Any]] = []
 
     visualizations = state.get("visualizations", [])
-    chart_spec = next((v for v in visualizations if "type" in v), {})
+    chart_specs = [v for v in visualizations if "type" in v]
+    chart_spec = chart_specs[0] if chart_specs else {}
     diagram_specs = [v for v in visualizations if "diagram_type" in v]
 
     # ── MCP session ─────────────────────────────────────────────────────────
@@ -168,6 +202,22 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
     except RuntimeError as exc:
         logger.error("synthesize_node: MCP session unavailable: %s", exc)
         session = None
+
+    # Ground the narrative in deterministic calculations before involving an
+    # LLM. Failure is non-fatal: raw rows and other artifacts remain usable.
+    data_analysis: dict[str, Any] = {}
+    if raw_results and session:
+        t0 = time.monotonic()
+        try:
+            data_analysis = await _call_tool(session, "analyze_data", {
+                "raw_data": raw_results,
+                "analysis_types": ["summary", "trend", "outliers", "quality", "contributors"],
+            })
+            duration_ms = round((time.monotonic() - t0) * 1000, 1)
+            extra_tool_calls.append({"tool": "analyze_data", "status": "done", "duration_ms": duration_ms})
+        except Exception as exc:
+            logger.warning("analyze_data tool failed: %s", exc)
+            extra_tool_calls.append({"tool": "analyze_data", "status": "error", "duration_ms": 0})
 
     # ── Optional explain_data call ──────────────────────────────────────────
     summary = ""
@@ -183,9 +233,10 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
                 rich_prompt = _build_explain_prompt(
                     original_prompt=prompt,
                     diagram_specs=diagram_specs,
-                    has_chart=bool(chart_spec),
+                    has_chart=bool(chart_specs),
                     raw_results=raw_results,
                     retrieved_schemas=retrieved_schemas,
+                    data_analysis=data_analysis,
                 )
                 payload = await _call_tool(session, "explain_data", {
                     "prompt": rich_prompt,
@@ -209,6 +260,41 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
         summary = " · ".join(parts) if parts else "Done."
 
     # ── Semantic cache update ────────────────────────────────────────────────
+    # Final completion gate. It compares the supervisor plan with the actual
+    # artifacts and makes partial results explicit instead of silently passing.
+    response_verification: dict[str, Any] = {}
+    if session:
+        t0 = time.monotonic()
+        try:
+            response_verification = await _call_tool(session, "verify_response", {
+                "supervisor_plan": plan,
+                "sql_query": sql_query,
+                "raw_data": raw_results,
+                "visualizations": visualizations,
+                "summary": summary,
+                "data_analysis": data_analysis,
+                "tool_calls": list(state.get("tool_calls", [])) + extra_tool_calls,
+                "schema_available": bool(retrieved_schemas),
+                "fatal_error": "",
+                "original_prompt": prompt,
+            })
+            duration_ms = round((time.monotonic() - t0) * 1000, 1)
+            extra_tool_calls.append({
+                "tool": "verify_response", "status": "done", "duration_ms": duration_ms,
+            })
+            missing = response_verification.get("missing_artifacts", [])
+            if missing:
+                readable = ", ".join(item.replace("_", " ") for item in missing)
+                summary += (
+                    "\n\nResponse verification: the following requested output "
+                    f"was not produced: {readable}."
+                )
+        except Exception as exc:
+            logger.warning("verify_response tool failed: %s", exc)
+            extra_tool_calls.append({
+                "tool": "verify_response", "status": "error", "duration_ms": 0,
+            })
+
     if cache_enabled and (raw_results or diagram_specs):
         try:
             await set_semantic_cache(
@@ -217,8 +303,11 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
                     "sql_query": sql_query,
                     "summary": summary,
                     "chart_spec": chart_spec,
+                    "chart_specs": chart_specs,
                     "diagram_spec": diagram_specs,
                     "raw_results": raw_results,
+                    "data_analysis": data_analysis,
+                    "response_verification": response_verification,
                 },
                 tenant_id,
             )
@@ -235,6 +324,8 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
             "chart_type": chart_spec.get("type"),
             "diagram_types": [d.get("diagram_type") for d in diagram_specs],
             "rows_count": len(raw_results),
+            "analysis_available": bool(data_analysis),
+            "verification_status": response_verification.get("status", "unavailable"),
         })
     except Exception as exc:
         logger.warning("Session memory append failed: %s", exc)
@@ -243,6 +334,8 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
     logger.info(f"Synthesis complete for session {session_id}. Summary length: {len(summary)}")
     return {
         "summary": summary,
+        "data_analysis": data_analysis,
+        "response_verification": response_verification,
         "tool_calls": extra_tool_calls,
         "current_phase": "complete",
     }

@@ -289,9 +289,11 @@ export const App: React.FC = () => {
                       )}
 
                       {/* 5. Chart (Chart.js Visualization) */}
-                      {msg.chartSpec && msg.chartSpec.type !== 'table' && (
-                        <ChartViewer spec={msg.chartSpec} />
-                      )}
+                      {(msg.chartSpecs || (msg.chartSpec ? [msg.chartSpec] : []))
+                        .filter((spec) => spec.type !== 'table')
+                        .map((spec, idx) => (
+                          <ChartViewer key={`chart-${msg.id}-${idx}`} spec={spec} />
+                        ))}
 
                       {/* 6. AI Insight — shown AFTER diagrams, table, and chart so it explains everything above */}
                       {msg.summary && (
@@ -356,9 +358,11 @@ export const App: React.FC = () => {
                     )}
 
                     {/* 4. Chart (Chart.js Visualization) */}
-                    {currentMessage.chartSpec && currentMessage.chartSpec.type !== 'table' && (
-                      <ChartViewer spec={currentMessage.chartSpec} />
-                    )}
+                    {(currentMessage.chartSpecs || (currentMessage.chartSpec ? [currentMessage.chartSpec] : []))
+                      .filter((spec) => spec.type !== 'table')
+                      .map((spec, idx) => (
+                        <ChartViewer key={`chart-current-${idx}`} spec={spec} />
+                      ))}
 
                     {/* 5. AI Insight — shown AFTER diagrams, table, and chart */}
                     {currentMessage.summary && (

@@ -120,15 +120,20 @@ async def run_langgraph_sse(
 
             # ── chat / synthesize (terminal nodes) ────────────────────────
             elif node_name in ("chat", "synthesize"):
-                chart_spec = next((v for v in local_visualizations if "type" in v), {})
+                chart_specs = [v for v in local_visualizations if "type" in v]
+                chart_spec = chart_specs[0] if chart_specs else {}
                 diagram_specs = [v for v in local_visualizations if "diagram_type" in v]
 
                 yield format_sse_event(
                     "final_response",
                     {
                         "summary": state_update.get("summary", ""),
+                        "data_analysis": state_update.get("data_analysis", {}),
+                        "response_verification": state_update.get("response_verification", {}),
                         "chart_spec": chart_spec,
+                        "chart_specs": chart_specs,
                         "diagram_spec": diagram_specs,
+                        "visualizations": local_visualizations,
                         "tool_calls": state_update.get("tool_calls", []),
                     },
                 )
