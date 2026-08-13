@@ -243,11 +243,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center justify-between px-4 py-3.5 border-b border-zinc-800/80">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-7 w-7 items-center justify-center rounded-lg overflow-hidden">
-                  <img src="/logo.png" alt="WonderDB Logo" className="h-full w-full object-cover" />
+                  <img src="/logo.png" alt="WonderDB-Agent Logo" className="h-full w-full object-cover" />
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="font-semibold text-sm tracking-tight text-zinc-100">
-                    WonderDB Agent
+                    WonderDB-Agent
                   </span>
                   <span className="rounded bg-zinc-800 border border-zinc-700 px-1 py-0.2 text-[9px] font-mono text-zinc-400">
                     v1.0
@@ -498,7 +498,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors overflow-hidden p-0.5"
                 title="Expand sidebar"
               >
-                <img src="/logo.png" alt="WonderDB Logo" className="h-full w-full object-contain rounded-md" />
+                <img src="/logo.png" alt="WonderDB-Agent Logo" className="h-full w-full object-contain rounded-md" />
               </button>
 
               {/* 2. New Query Button */}

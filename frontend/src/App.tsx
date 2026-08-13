@@ -154,9 +154,9 @@ export const App: React.FC = () => {
             {messages.length === 0 && !currentMessage && (
               <div className="flex flex-col items-center justify-center min-h-[60vh] w-full max-w-3xl mx-auto animate-fadeIn">
                 <div className="flex items-center gap-3 mb-8">
-                  <img src="/logo.png" alt="WonderDB Logo" className="h-10 w-10 object-contain" />
+                  <img src="/logo.png" alt="WonderDB-Agent Logo" className="h-10 w-10 object-contain" />
                   <h1 className="text-4xl font-serif text-zinc-100 tracking-tight">
-                    WonderDB Agent
+                    WonderDB-Agent
                   </h1>
                 </div>
                 <ChatInput 
