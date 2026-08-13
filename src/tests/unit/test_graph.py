@@ -14,6 +14,7 @@ Bug fixes applied:
 import pytest
 
 from agent.graph import get_graph, route_after_supervisor, dynamic_viz_routing
+from agent.nodes.chat_node import _looks_like_identity_question
 from agent.state import GlobalState
 
 SAMPLE_TENANT_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
@@ -23,6 +24,14 @@ def test_langgraph_compiles() -> None:
     """Graph should compile without errors."""
     graph = get_graph()
     assert graph is not None
+
+
+def test_identity_questions_are_detected() -> None:
+    assert _looks_like_identity_question("who are you")
+    assert _looks_like_identity_question("who developed you")
+    assert _looks_like_identity_question("who is your owner")
+    assert _looks_like_identity_question("who owns WonderDB Agent")
+    assert not _looks_like_identity_question("what is the average order value")
 
 
 def test_route_after_supervisor_cached_hit() -> None:

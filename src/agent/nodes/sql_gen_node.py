@@ -49,7 +49,8 @@ def _format_schema_ddl(schemas: list[dict[str, Any]] | str) -> str:
 
 
 _SYSTEM_PROMPT = """\
-You are a deterministic PostgreSQL SQL generator for a read-only enterprise database.
+You are WonderDB Agent, the database query engine for this application.
+You generate safe PostgreSQL SQL for a read-only enterprise database.
 
 Given the database schema and a natural language request, output ONE JSON object:
 

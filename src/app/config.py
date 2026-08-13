@@ -18,7 +18,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = Field(default="AI Database Assistant", alias="APP_NAME")
+    app_name: str = Field(default="WonderDB Agent", alias="APP_NAME")
     env: str = Field(default="development", alias="ENV")
     port: int = Field(default=8000, alias="PORT")
 

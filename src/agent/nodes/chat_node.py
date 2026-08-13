@@ -53,11 +53,34 @@ _EXPLAIN_KEYWORDS = [
 ]
 
 
+def _looks_like_identity_question(prompt: str) -> bool:
+    """Detect identity/ownership questions that should be answered as WonderDB Agent."""
+    if not prompt:
+        return False
+    text = prompt.lower().strip("?!. ")
+    identity_markers = (
+        "who are you",
+        "who are you?",
+        "what are you",
+        "who is wonderdb agent",
+        "who developed you",
+        "who built you",
+        "who created you",
+        "who is your owner",
+        "who owns you",
+        "who is your developer",
+        "who is the developer of wonderdb agent",
+        "who made you",
+        "who owns wonderdb agent",
+    )
+    return any(marker in text for marker in identity_markers)
+
+
 async def _call_gemini(system_instruction: str, user_content: str) -> str:
     """Make a single Gemini generateContent call and return the text response."""
     settings = get_settings()
     if not settings.gemini_api_key or not settings.gemini_model:
-        return "I'm here to help! Ask me to query your database, generate charts, or draw ER diagrams."
+        return "I am WonderDB Agent — a natural-language database assistant that can query your database, generate charts, and explain results. Ask me anything about your data or schema."
 
     try:
         model_name = settings.gemini_model.strip()
@@ -162,10 +185,19 @@ async def chat_node(state: GlobalState) -> GlobalState:
     else:  # intent == "chat"
         is_greeting = any(kw in prompt_lower for kw in _GREETING_KEYWORDS)
         is_help = any(kw in prompt_lower for kw in _HELP_KEYWORDS)
+        is_identity = _looks_like_identity_question(prompt)
 
-        if is_greeting:
+        if is_identity:
             system_msg = (
-                "You are a friendly and enthusiastic AI database assistant named DataBot. "
+                "You are WonderDB Agent, the database analytics assistant in this application. "
+                "Answer identity questions directly and briefly: state that you are WonderDB Agent, "
+                "that you help users query databases in plain language, generate charts and diagrams, "
+                "and explain results. If asked who developed or owns you, say that WonderDB Agent is the project agent built by the WonderDB development team behind this application. "
+                "Keep it concise, friendly, and confident."
+            )
+        elif is_greeting:
+            system_msg = (
+                "You are WonderDB Agent, a friendly and enthusiastic database assistant. "
                 "Greet the user warmly and briefly explain your capabilities in 2-3 sentences: "
                 "you can query databases using natural language, generate bar/line/pie/scatter charts, "
                 "draw ER diagrams and process flow diagrams, and explain data in plain language. "
@@ -173,7 +205,7 @@ async def chat_node(state: GlobalState) -> GlobalState:
             )
         elif is_help:
             system_msg = (
-                "You are a helpful AI database assistant. Explain your capabilities clearly and concisely:\n"
+                "You are WonderDB Agent. Explain your capabilities clearly and concisely:\n"
                 "1. Query databases with natural language (e.g. 'show top 10 customers by revenue')\n"
                 "2. Generate charts: bar, line, pie, scatter\n"
                 "3. Draw diagrams: ER diagrams, process flows, decision trees\n"
@@ -182,7 +214,7 @@ async def chat_node(state: GlobalState) -> GlobalState:
             )
         else:
             system_msg = (
-                "You are a helpful AI database assistant. Answer the user's question. "
+                "You are WonderDB Agent, a helpful database assistant. Answer the user's question. "
                 "If the question is not related to databases or data analysis, "
                 "politely explain that you specialise in database queries and analytics, "
                 "and suggest they rephrase as a data question."
