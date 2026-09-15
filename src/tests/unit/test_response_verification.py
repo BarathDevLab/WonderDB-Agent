@@ -12,7 +12,11 @@ def test_verifier_accepts_complete_multi_artifact_response() -> None:
         raw_data=[{"month": "2026-01", "revenue": 100}],
         visualizations=[
             {"type": "line", "data": {"datasets": [{"data": [100]}]}},
-            {"diagram_type": "er", "mermaid": "erDiagram\n  A ||--o{ B : has"},
+            {
+                "diagram_type": "er",
+                "generation_basis": "schema_metadata",
+                "mermaid": "erDiagram\n  A ||--o{ B : has",
+            },
         ],
         summary="Revenue was 100 in January.",
         data_analysis={"row_count": 1, "data_quality": {}},
@@ -105,8 +109,9 @@ def test_verifier_requires_semantic_process_mode() -> None:
         **common,
         visualizations=[{
             "diagram_type": "process",
-            "process_mode": "agent_pipeline",
-            "mermaid": "flowchart LR\n  REQUEST --> VERIFY",
+            "process_mode": "schema_flow",
+            "generation_basis": "schema_foreign_keys",
+            "mermaid": "flowchart LR\n  CUSTOMERS --> ORDERS",
         }],
     )
 
@@ -137,6 +142,7 @@ def test_verifier_rejects_fabricated_or_unclassified_decision_tree() -> None:
         visualizations=[{
             "diagram_type": "decision",
             "decision_mode": "learned_classification",
+            "generation_basis": "query_labeled_outcomes",
             "mermaid": "flowchart TD\n  A{risk_score <= 50?}",
         }],
     )

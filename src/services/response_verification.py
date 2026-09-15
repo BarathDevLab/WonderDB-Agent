@@ -79,17 +79,34 @@ def verify_agent_response(
             and "NO_DATA" not in mermaid
             and "NOT_APPLICABLE" not in mermaid
         )
+        if diagram_type == "er":
+            diagram_is_real = (
+                diagram_is_real
+                and visual.get("generation_basis") == "schema_metadata"
+            )
         if diagram_type == "process":
-            diagram_is_real = diagram_is_real and visual.get("process_mode") in {
-                "state_transitions",
-                "ordered_steps",
-                "agent_pipeline",
+            expected_process_basis = {
+                "state_transitions": "query_state_transitions",
+                "ordered_steps": "query_ordered_steps",
+                "schema_flow": "schema_foreign_keys",
             }
+            process_mode = visual.get("process_mode")
+            diagram_is_real = (
+                diagram_is_real
+                and process_mode in expected_process_basis
+                and expected_process_basis[process_mode] == visual.get("generation_basis")
+            )
         if diagram_type == "decision":
-            diagram_is_real = diagram_is_real and visual.get("decision_mode") in {
-                "rule_hierarchy",
-                "learned_classification",
+            expected_decision_basis = {
+                "rule_hierarchy": "query_rule_hierarchy",
+                "learned_classification": "query_labeled_outcomes",
             }
+            decision_mode = visual.get("decision_mode")
+            diagram_is_real = (
+                diagram_is_real
+                and decision_mode in expected_decision_basis
+                and expected_decision_basis[decision_mode] == visual.get("generation_basis")
+            )
         if diagram_type in _DIAGRAM_TYPES and diagram_is_real:
             delivered.add({
                 "er": "er_diagram",

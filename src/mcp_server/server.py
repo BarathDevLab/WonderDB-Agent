@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import sys
 import uuid as _uuid
 from collections import Counter
@@ -309,6 +310,10 @@ def generate_chart(
     if not raw_data:
         return json.dumps({"type": "empty", "data": {}, "options": {}})
 
+    chart_type = str(chart_type or "auto").strip().lower()
+    if chart_type not in {"auto", "bar", "line", "pie", "scatter"}:
+        chart_type = "auto"
+
     keys = list(dict.fromkeys(key for row in raw_data for key in row))
     numeric_keys = [
         key for key in keys
@@ -510,30 +515,47 @@ def generate_flowchart(
     Generate a Mermaid diagram string.
     diagram_type options:
       - 'er'       : Entity-Relationship diagram from schema FK relationships
-      - 'process'  : Semantic state, ordered-step, or agent-execution flow
+      - 'process'  : State transitions, ordered steps, or FK-grounded schema flow
       - 'decision' : Decision tree with conditional branches (bonus)
-    Returns Mermaid plus the diagram type and semantic generation mode.
+    Returns Mermaid plus the diagram type, semantic generation mode, and the
+    evidence used to generate it. Process diagrams never invent a workflow
+    from ordinary analytical rows.
     """
-    raw_data = raw_data or []
-    schema = schema or _schema_catalog
+    raw_data = [] if raw_data is None else raw_data
+    schema = _schema_catalog if schema is None else schema
     process_mode = None
     decision_mode = None
     decision_target = None
+    generation_basis = "schema_metadata" if diagram_type == "er" else "none"
 
     if diagram_type == "er":
         mermaid = _build_er_diagram(schema)
     elif diagram_type == "process":
-        process_mode = _detect_process_mode(raw_data)
-        mermaid = _build_process_flow(raw_data, title, process_mode)
+        process_mode = _detect_process_mode(raw_data, schema)
+        mermaid = _build_process_flow(raw_data, title, process_mode, schema)
+        generation_basis = {
+            "state_transitions": "query_state_transitions",
+            "ordered_steps": "query_ordered_steps",
+            "schema_flow": "schema_foreign_keys",
+        }.get(process_mode, "none")
     elif diagram_type == "decision":
         decision_mode = _detect_decision_mode(raw_data)
         mermaid = _build_decision_tree(raw_data, title, decision_mode)
         if decision_mode == "learned_classification":
             decision_target = _classification_target(raw_data)
+        generation_basis = {
+            "rule_hierarchy": "query_rule_hierarchy",
+            "learned_classification": "query_labeled_outcomes",
+        }.get(decision_mode, "none")
     else:
         diagram_type = "process"
-        process_mode = _detect_process_mode(raw_data)
-        mermaid = _build_process_flow(raw_data, title, process_mode)
+        process_mode = _detect_process_mode(raw_data, schema)
+        mermaid = _build_process_flow(raw_data, title, process_mode, schema)
+        generation_basis = {
+            "state_transitions": "query_state_transitions",
+            "ordered_steps": "query_ordered_steps",
+            "schema_flow": "schema_foreign_keys",
+        }.get(process_mode, "none")
 
     return json.dumps({
         "mermaid": mermaid,
@@ -541,40 +563,85 @@ def generate_flowchart(
         "process_mode": process_mode,
         "decision_mode": decision_mode,
         "decision_target": decision_target,
+        "generation_basis": generation_basis,
     })
+
+
+def _mermaid_identifier(value: Any, prefix: str = "T") -> str:
+    """Return a stable Mermaid-safe identifier while preserving readable labels."""
+    identifier = re.sub(r"[^A-Za-z0-9_]", "_", str(value)).strip("_") or prefix
+    if identifier[0].isdigit():
+        identifier = f"{prefix}_{identifier}"
+    return identifier.upper()
+
+
+def _schema_table_map(schema: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """De-duplicate valid catalog entries without changing their source order."""
+    tables: dict[str, dict[str, Any]] = {}
+    for table in schema:
+        name = str(table.get("table_name", "")).strip()
+        if name and name not in tables:
+            tables[name] = table
+    return tables
+
+
+def _schema_relationships(
+    schema: list[dict[str, Any]],
+) -> list[tuple[str, str, str, str]]:
+    """Return unique (parent, child, child_fk, parent_key) relationships."""
+    relationships: list[tuple[str, str, str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for child_name, table in _schema_table_map(schema).items():
+        for fk in table.get("foreign_keys", []):
+            parent_name = str(fk.get("foreign_table", "")).strip()
+            child_column = str(fk.get("column", "")).strip()
+            parent_column = str(fk.get("foreign_column", "")).strip()
+            if not parent_name or not child_column:
+                continue
+            relationship = (parent_name, child_name, child_column, parent_column)
+            if relationship not in seen:
+                seen.add(relationship)
+                relationships.append(relationship)
+    return relationships
 
 
 def _build_er_diagram(schema: list[dict[str, Any]]) -> str:
     """Build Mermaid erDiagram from schema FK relationships."""
-    if not schema:
+    tables = _schema_table_map(schema)
+    if not tables:
         return "erDiagram\n  NO_SCHEMA_LOADED"
 
     lines = ["erDiagram"]
-    for table in schema:
-        t_name = table["table_name"].upper().replace("-", "_")
+    table_ids = {name: _mermaid_identifier(name) for name in tables}
+    for table_name, table in tables.items():
+        t_name = table_ids[table_name]
         cols = table.get("columns", [])
         lines.append(f"  {t_name} {{")
         for col in cols:
             # Clean data type for Mermaid (alphanumeric/underscore only, no parens or spaces)
             raw_type = str(col.get("type", "STRING")).upper()
-            clean_type = raw_type.split("(")[0].replace(" ", "_").replace("-", "_")
-            c_name = str(col.get("name", "")).replace("-", "_")
+            clean_type = re.sub(r"[^A-Z0-9_]", "_", raw_type.split("(")[0]).strip("_")
+            clean_type = clean_type or "STRING"
+            c_name = _mermaid_identifier(col.get("name", "column"), "C").lower()
             pk_marker = " PK" if col.get("is_pk") else (" FK" if col.get("is_fk") else "")
             pii_marker = " \"PII\"" if col.get("is_pii") else ""
             lines.append(f"    {clean_type} {c_name}{pk_marker}{pii_marker}")
         lines.append("  }")
 
-    # Relationships
-    seen_rels = set()
-    for table in schema:
-        t_name = table["table_name"].upper().replace("-", "_")
-        for fk in table.get("foreign_keys", []):
-            foreign = fk["foreign_table"].upper().replace("-", "_")
-            col = fk["column"].replace("-", "_")
-            rel_str = f"  {t_name} ||--o{{ {foreign} : \"{col}\""
-            if rel_str not in seen_rels:
-                seen_rels.add(rel_str)
-                lines.append(rel_str)
+    # A child FK points to exactly one parent while a parent can have zero or
+    # many children. Render that direction explicitly; the old implementation
+    # reversed parent and child cardinalities.
+    for parent, child, child_column, parent_column in _schema_relationships(schema):
+        if parent not in table_ids:
+            table_ids[parent] = _mermaid_identifier(parent)
+            lines.extend([f"  {table_ids[parent]} {{", "  }"])
+        relation_label = _mermaid_label(
+            f"{child_column} -> {parent_column}" if parent_column else child_column,
+            48,
+        )
+        lines.append(
+            f"  {table_ids[parent]} ||--o{{ {table_ids[child]} : \"{relation_label}\""
+        )
 
     return "\n".join(lines)
 
@@ -593,16 +660,19 @@ def _find_key(keys: list[str], aliases: set[str]) -> str | None:
     return next((key for key in keys if key.lower().strip() in aliases), None)
 
 
-def _detect_process_mode(raw_data: list[dict[str, Any]]) -> str:
-    """Classify process-shaped data without fuzzy substring matches."""
-    if not raw_data:
-        return "not_applicable"
+def _detect_process_mode(
+    raw_data: list[dict[str, Any]],
+    schema: list[dict[str, Any]] | None = None,
+) -> str:
+    """Classify only evidence-backed process or schema-flow inputs."""
     keys = list(dict.fromkeys(key for row in raw_data for key in row))
     if _find_key(keys, _FROM_STATE_ALIASES) and _find_key(keys, _TO_STATE_ALIASES):
         return "state_transitions"
     if _find_key(keys, _STEP_ORDER_ALIASES) and _find_key(keys, _STEP_LABEL_ALIASES):
         return "ordered_steps"
-    return "agent_pipeline"
+    if schema and _schema_relationships(schema):
+        return "schema_flow"
+    return "not_applicable"
 
 
 def _mermaid_label(value: Any, max_length: int = 72) -> str:
@@ -615,13 +685,13 @@ def _build_process_flow(
     raw_data: list[dict[str, Any]],
     title: str = "",
     mode: str | None = None,
+    schema: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Build a semantic state, ordered-stage, or agent-execution flow."""
-    if not raw_data:
-        return "flowchart TD\n  NOT_APPLICABLE[No process or query data available]"
+    """Build a state, ordered-stage, or FK-grounded schema flow."""
+    schema = schema or []
 
     keys = list(dict.fromkeys(key for row in raw_data for key in row))
-    mode = mode or _detect_process_mode(raw_data)
+    mode = mode or _detect_process_mode(raw_data, schema)
 
     if mode == "state_transitions":
         from_key = _find_key(keys, _FROM_STATE_ALIASES)
@@ -685,32 +755,59 @@ def _build_process_flow(
         lines.append("  class START,DONE terminal")
         return "\n".join(lines)
 
-    # Analytical rows are not business-process stages. Show the actual agent
-    # workflow used to produce the requested analysis instead of chaining rows.
-    request_label = _mermaid_label(title or "Analyze database request", 64)
-    row_count = len(raw_data)
+    if mode == "schema_flow":
+        tables = _schema_table_map(schema)
+        relationships = _schema_relationships(schema)
+        all_names = list(tables)
+        for parent, child, _, _ in relationships:
+            if parent not in all_names:
+                all_names.append(parent)
+            if child not in all_names:
+                all_names.append(child)
+        node_ids = {name: f"T{index}" for index, name in enumerate(all_names)}
+        lines = ["flowchart LR"]
+        child_fk_counts = Counter(child for _, child, _, _ in relationships)
+        child_names = {child for _, child, _, _ in relationships}
+        parent_names = {parent for parent, _, _, _ in relationships}
+        for name in all_names:
+            table = tables.get(name, {})
+            primary_keys = [
+                str(col.get("name")) for col in table.get("columns", [])
+                if col.get("is_pk") and col.get("name")
+            ]
+            label = _mermaid_label(name, 42)
+            if primary_keys:
+                label += f"<br/>PK: {_mermaid_label(', '.join(primary_keys), 36)}"
+            lines.append(f'  {node_ids[name]}["{label}"]')
+        for parent, child, child_column, parent_column in relationships:
+            edge_label = f"{child}.{child_column} FK to {parent}"
+            if parent_column:
+                edge_label += f".{parent_column}"
+            edge_label = _mermaid_label(edge_label, 64).replace("|", "/")
+            lines.append(
+                f"  {node_ids[parent]} -->|{edge_label}| {node_ids[child]}"
+            )
+        roots = [node_ids[name] for name in all_names if name in parent_names and name not in child_names]
+        junctions = [node_ids[name] for name, count in child_fk_counts.items() if count >= 2]
+        lines.extend([
+            "  classDef root fill:#064e3b,stroke:#10b981,color:#f4f4f5",
+            "  classDef entity fill:#172554,stroke:#6366f1,color:#f4f4f5",
+            "  classDef junction fill:#3b0764,stroke:#a855f7,color:#f4f4f5",
+            f"  class {','.join(node_ids.values())} entity",
+        ])
+        if roots:
+            lines.append(f"  class {','.join(roots)} root")
+        if junctions:
+            lines.append(f"  class {','.join(junctions)} junction")
+        return "\n".join(lines)
+
+    reason = _mermaid_label(
+        title or "Process flow requires state transitions, ordered steps, or foreign keys",
+        88,
+    )
     return "\n".join([
         "flowchart LR",
-        f'  START(["Request: {request_label}"])',
-        '  SCHEMA["Discover relevant schema"]',
-        '  SQL["Generate read-only SQL"]',
-        '  SAFETY{"AST and cost checks pass?"}',
-        '  EXEC[("Execute tenant-scoped query")]',
-        f'  ANALYZE["Analyze {row_count} returned rows"]',
-        '  VIS["Generate requested visualizations"]',
-        '  EXPLAIN["Explain grounded findings"]',
-        '  VERIFY{"All requested outputs delivered?"}',
-        '  REPAIR["Repair failed task"]',
-        '  DONE(["Return verified response"])',
-        "  START --> SCHEMA --> SQL --> SAFETY",
-        "  SAFETY -->|Yes| EXEC --> ANALYZE --> VIS --> EXPLAIN --> VERIFY",
-        "  SAFETY -->|No| REPAIR --> SQL",
-        "  VERIFY -->|No| REPAIR",
-        "  VERIFY -->|Yes| DONE",
-        "  classDef terminal fill:#064e3b,stroke:#10b981,color:#f4f4f5",
-        "  classDef decision fill:#422006,stroke:#f59e0b,color:#f4f4f5",
-        "  class START,DONE terminal",
-        "  class SAFETY,VERIFY decision",
+        f'  NOT_APPLICABLE["Cannot build a grounded process flow: {reason}"]',
     ])
 
 

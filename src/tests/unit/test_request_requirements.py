@@ -1,4 +1,5 @@
 from services.request_requirements import (
+    is_schema_visualization_request,
     requested_visualizations_from_prompt,
     resolve_followup_visualizations,
 )
@@ -47,6 +48,52 @@ def test_explicit_chart_change_replaces_previous_chart() -> None:
     )
 
     assert result == ["bar_chart"]
+
+
+def test_temporal_regroup_uses_line_chart_even_after_previous_bar() -> None:
+    result = resolve_followup_visualizations(
+        "Show the same data grouped by date",
+        {
+            "followup_kind": "data",
+            "previous_chart_types": ["bar"],
+            "previous_diagram_types": ["er"],
+        },
+        ["bar_chart"],
+    )
+
+    assert result == ["line_chart", "er_diagram"]
+
+
+def test_schema_flow_language_is_detected_without_the_word_process() -> None:
+    assert requested_visualizations_from_prompt(
+        "Show a flow diagram of the actual schema",
+    ) == ["process_flow"]
+
+
+def test_schema_and_process_flow_requests_both_diagrams_deterministically() -> None:
+    prompt = "Show the actual schema and process flow"
+
+    assert requested_visualizations_from_prompt(prompt) == [
+        "er_diagram",
+        "process_flow",
+    ]
+    assert is_schema_visualization_request(prompt) is True
+
+
+def test_schema_diagram_with_data_analysis_remains_a_query() -> None:
+    prompt = "Show revenue trends and include the database schema diagram"
+
+    assert is_schema_visualization_request(prompt) is False
+
+
+def test_er_and_process_flow_without_schema_word_is_schema_only() -> None:
+    prompt = "Generate an ER diagram and process flow"
+
+    assert requested_visualizations_from_prompt(prompt) == [
+        "er_diagram",
+        "process_flow",
+    ]
+    assert is_schema_visualization_request(prompt) is True
 
 
 def test_keep_all_outputs_preserves_previous_and_adds_explicit() -> None:

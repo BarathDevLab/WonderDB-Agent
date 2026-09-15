@@ -78,7 +78,9 @@ export const DiagramViewer: React.FC<DiagramViewerProps> = ({ spec }) => {
           : 'Decision Tree';
       case 'process':
       default:
-        return 'Process Flow Diagram';
+        return spec.process_mode === 'schema_flow'
+          ? 'Schema Relationship Flow'
+          : 'Process Flow Diagram';
     }
   };
 

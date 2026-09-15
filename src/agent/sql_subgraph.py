@@ -68,6 +68,18 @@ async def sql_engine_wrapper(state: GlobalState) -> dict:
     Translates GlobalState fields into SQLSubgraphState, runs the loop,
     then maps results back — exposing only the fields the main graph needs.
     """
+    if state.get("supervisor_plan", {}).get("intent") == "schema":
+        logger.info("sql_engine_wrapper: schema-only request; skipping SQL generation")
+        return {
+            "clean_dataset": [],
+            "sql_query": "",
+            "tool_calls": [],
+            "has_fatal_error": False,
+            "error_detail": "",
+            "summary": "",
+            "current_phase": "schema_ready",
+        }
+
     sub_state: SQLSubgraphState = {
         "tenant_id": state.get("tenant_id", "default-tenant"),
         "prompt": state.get("resolved_prompt") or state.get("prompt", ""),

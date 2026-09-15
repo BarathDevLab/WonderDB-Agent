@@ -11,8 +11,6 @@ Bug fixes applied:
   - Removed stale field assertions (ast_valid, raw_results, chart_spec, plan_strategy)
     that referenced old pre-refactor state schema
 """
-import pytest
-
 from agent.graph import get_graph, route_after_supervisor, dynamic_viz_routing
 from agent.nodes.chat_node import _looks_like_identity_question
 from agent.state import GlobalState
@@ -84,7 +82,7 @@ def test_route_after_supervisor_error() -> None:
 
 
 def test_dynamic_viz_routing_fatal_error() -> None:
-    """Fatal errors should always bypass visualization and go to synthesize."""
+    """A fatal query error with only data-backed output goes to synthesize."""
     state: GlobalState = {
         "has_fatal_error": True,
         "supervisor_plan": {"intent": "query", "visualizations": ["bar_chart"], "needs_explanation": True},
@@ -92,6 +90,34 @@ def test_dynamic_viz_routing_fatal_error() -> None:
     }
     result = dynamic_viz_routing(state)
     assert result == "synthesize"
+
+
+def test_fatal_query_error_still_dispatches_independent_schema_diagrams() -> None:
+    schema = [{
+        "table_name": "orders",
+        "columns": [],
+        "foreign_keys": [{
+            "column": "customer_id",
+            "foreign_table": "customers",
+            "foreign_column": "customer_id",
+        }],
+    }]
+    state: GlobalState = {
+        "has_fatal_error": True,
+        "supervisor_plan": {
+            "intent": "query",
+            "visualizations": ["line_chart", "er_diagram", "process_flow"],
+            "needs_explanation": True,
+        },
+        "clean_dataset": [],
+        "retrieved_schemas": schema,
+        "prompt": "Show revenue plus the ER diagram and schema flow",
+    }
+
+    result = dynamic_viz_routing(state)
+
+    assert isinstance(result, list)
+    assert [send.node for send in result] == ["er_worker", "process_worker"]
 
 
 def test_dynamic_viz_routing_no_viz() -> None:
@@ -141,3 +167,52 @@ def test_dynamic_viz_routing_dispatches_every_requested_visualization() -> None:
     assert [send.node for send in result] == [
         "chart_worker", "chart_worker", "chart_worker", "er_worker",
     ]
+
+
+def test_process_flow_receives_schema_even_without_query_rows() -> None:
+    schema = [{
+        "table_name": "orders",
+        "columns": [],
+        "foreign_keys": [{
+            "column": "customer_id",
+            "foreign_table": "customers",
+            "foreign_column": "customer_id",
+        }],
+    }]
+    state: GlobalState = {
+        "has_fatal_error": False,
+        "supervisor_plan": {
+            "intent": "schema",
+            "visualizations": ["process_flow"],
+            "needs_explanation": False,
+        },
+        "clean_dataset": [],
+        "retrieved_schemas": schema,
+        "prompt": "Show the schema flow",
+    }
+
+    result = dynamic_viz_routing(state)
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert result[0].node == "process_worker"
+    assert result[0].arg["schema"] == schema
+
+
+def test_schema_workers_dispatch_even_when_rag_returns_empty() -> None:
+    state: GlobalState = {
+        "has_fatal_error": False,
+        "supervisor_plan": {
+            "intent": "schema",
+            "visualizations": ["er_diagram", "process_flow"],
+            "needs_explanation": True,
+        },
+        "clean_dataset": [],
+        "retrieved_schemas": [],
+        "prompt": "Show the schema and process flow",
+    }
+
+    result = dynamic_viz_routing(state)
+
+    assert isinstance(result, list)
+    assert [send.node for send in result] == ["er_worker", "process_worker"]

@@ -492,6 +492,8 @@ class SchemaRAGService:
         pool: Any,
         api_key: str,
         model: str,
+        prefer_full_catalog: bool = False,
+        fallback_to_catalog: bool = True,
     ) -> list[dict[str, Any]]:
         """
         Full Phase 3 pipeline: embed prompt → vector search → FK expansion.
@@ -506,9 +508,17 @@ class SchemaRAGService:
         Returns:
             Ordered list of relevant table/column dicts for LLM context.
         """
-        # Ensure Phase 1 has run
+        # Ensure Phase 1 has run. Database metadata is the authoritative
+        # fallback when the optional embedding/vector layer is unavailable.
         if self._live_catalog is None:
-            await self._discover_schema_from_db(pool)
+            for attempt in range(2):
+                if await self._discover_schema_from_db(pool):
+                    break
+                if attempt == 0:
+                    await asyncio.sleep(0.1)
+        catalog = self._get_catalog()
+        if prefer_full_catalog:
+            return list(catalog)
 
         # Embed the user prompt
         try:
@@ -517,7 +527,7 @@ class SchemaRAGService:
             logger.error(
                 "Phase 3 – Failed to embed user prompt for schema retrieval: %s", exc
             )
-            return []
+            return list(catalog) if fallback_to_catalog else []
 
         # Vector search (Phase 3a)
         hits = await self._vector_search(prompt_vec, tenant_id, pool)
@@ -527,10 +537,11 @@ class SchemaRAGService:
                 "ensure sync_schema_catalog_to_db has been run",
                 tenant_id,
             )
-            return []
+            return list(catalog) if fallback_to_catalog else []
 
         # FK graph expansion (Phase 3b)
-        return self._expand_via_fk_graph(hits, self._get_catalog())
+        expanded = self._expand_via_fk_graph(hits, catalog)
+        return expanded or (list(catalog) if fallback_to_catalog else [])
 
 
 # ---------------------------------------------------------------------------
@@ -546,7 +557,12 @@ schema_rag_service = SchemaRAGService()
 
 
 async def retrieve_schema_context(
-    prompt: str, tenant_id: str, pool: Any
+    prompt: str,
+    tenant_id: str,
+    pool: Any,
+    *,
+    prefer_full_catalog: bool = False,
+    fallback_to_catalog: bool = True,
 ) -> list[dict[str, Any]]:
     """
     Phase 3 entry point used by the planning agent node.
@@ -560,6 +576,8 @@ async def retrieve_schema_context(
         pool=pool,
         api_key=settings.gemini_api_key,
         model=settings.gemini_embedding_model,
+        prefer_full_catalog=prefer_full_catalog,
+        fallback_to_catalog=fallback_to_catalog,
     )
 
 

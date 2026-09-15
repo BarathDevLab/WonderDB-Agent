@@ -17,7 +17,7 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-async def _call_tool(session: Any, tool_name: str, arguments: dict) -> dict[str, Any]:
+async def _call_tool(session: Any, tool_name: str, arguments: dict) -> Any:
     """Call an MCP tool and return parsed JSON response."""
     result = await session.call_tool(tool_name, arguments=arguments)
     raw_text = result.content[0].text if result.content else "{}"
@@ -28,8 +28,8 @@ async def _call_tool_with_retry(
     session: Any,
     tool_name: str,
     arguments: dict,
-    max_attempts: int = 2,
-) -> tuple[dict[str, Any], int]:
+    max_attempts: int = 3,
+) -> tuple[Any, int]:
     """Retry a deterministic visualization call once on transport/tool failure."""
     last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
@@ -41,6 +41,26 @@ async def _call_tool_with_retry(
                 await asyncio.sleep(0.1 * attempt)
     assert last_error is not None
     raise last_error
+
+
+async def _load_schema_fallback(
+    session: Any,
+    schema: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Use the MCP schema tool when planner-side schema retrieval is empty."""
+    if schema:
+        return schema, []
+    t0 = time.monotonic()
+    discovered, attempts = await _call_tool_with_retry(session, "get_schema", {})
+    duration_ms = round((time.monotonic() - t0) * 1000, 1)
+    if not isinstance(discovered, list) or not discovered:
+        raise ValueError("get_schema returned no table metadata")
+    return discovered, [{
+        "tool": "get_schema",
+        "status": "done",
+        "duration_ms": duration_ms,
+        "attempts": attempts,
+    }]
 
 async def chart_worker_node(state: dict[str, Any]) -> dict[str, Any]:
     """Worker to generate a chart. Input is state fragment with 'dataset' and 'chart_type'."""
@@ -82,6 +102,7 @@ async def er_worker_node(state: dict[str, Any]) -> dict[str, Any]:
     logger.info("ER diagram worker starting")
     try:
         session = await get_mcp_session()
+        schema, schema_calls = await _load_schema_fallback(session, schema)
         t0 = time.monotonic()
         er_spec, attempts = await _call_tool_with_retry(session, "generate_flowchart", {
             "diagram_type": "er",
@@ -92,7 +113,7 @@ async def er_worker_node(state: dict[str, Any]) -> dict[str, Any]:
         
         return {
             "visualizations": [er_spec],
-            "tool_calls": [{
+            "tool_calls": schema_calls + [{
                 "tool": "generate_flowchart[er]", "status": "done",
                 "duration_ms": duration_ms, "attempts": attempts,
             }]
@@ -105,17 +126,31 @@ async def er_worker_node(state: dict[str, Any]) -> dict[str, Any]:
 async def process_worker_node(state: dict[str, Any]) -> dict[str, Any]:
     """Worker to generate Process flow diagram."""
     raw_data = state.get("dataset", [])
+    schema = state.get("schema", [])
     title = state.get("title", "")
     logger.info("Process flow worker starting")
-    if not raw_data:
-        return {"visualizations": [], "tool_calls": []}
-        
+
     try:
         session = await get_mcp_session()
+        schema_calls: list[dict[str, Any]] = []
+        if not schema:
+            try:
+                schema, schema_calls = await _load_schema_fallback(session, schema)
+            except Exception as schema_exc:
+                if not raw_data:
+                    raise
+                logger.warning(
+                    "Process worker schema fallback failed; checking query-shaped process data: %s",
+                    schema_exc,
+                )
+                schema_calls.append({
+                    "tool": "get_schema", "status": "error", "duration_ms": 0,
+                })
         t0 = time.monotonic()
         process_spec, attempts = await _call_tool_with_retry(session, "generate_flowchart", {
             "diagram_type": "process",
             "raw_data": raw_data,
+            "schema": schema,
             "title": title[:60],
         })
         duration_ms = round((time.monotonic() - t0) * 1000, 1)
@@ -123,7 +158,7 @@ async def process_worker_node(state: dict[str, Any]) -> dict[str, Any]:
         
         return {
             "visualizations": [process_spec],
-            "tool_calls": [{
+            "tool_calls": schema_calls + [{
                 "tool": "generate_flowchart[process]", "status": "done",
                 "duration_ms": duration_ms, "attempts": attempts,
             }]

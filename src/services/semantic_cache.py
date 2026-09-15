@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 # Prevents O(N) Redis scan from blocking too long on large caches.
 _MAX_SCAN_ENTRIES = 500
 
+# Cached payloads include rendered artifact specs. Bump this value whenever
+# chart/diagram semantics change so an old visualization cannot bypass the new
+# generator and verifier after deployment.
+_CACHE_SCHEMA_VERSION = "2026-09-diagrams-v3"
+
 _shared_httpx: httpx.AsyncClient | None = None
 _shared_httpx_loop: Any = None
 
@@ -99,8 +104,10 @@ class SemanticCacheService:
 
     def _hash_key(self, prompt: str, tenant_id: str = "default") -> str:
         normalized = prompt.strip().lower()
-        digest = hashlib.sha256(f"{tenant_id}:{normalized}".encode("utf-8")).hexdigest()
-        return f"semantic_cache:{digest}"
+        digest = hashlib.sha256(
+            f"{_CACHE_SCHEMA_VERSION}:{tenant_id}:{normalized}".encode("utf-8")
+        ).hexdigest()
+        return f"semantic_cache:{_CACHE_SCHEMA_VERSION}:{digest}"
 
     async def get(
         self,
@@ -119,7 +126,8 @@ class SemanticCacheService:
             data = await client.get(exact_key)
             if data:
                 item = json.loads(data)
-                return item.get("payload", item)
+                if item.get("cache_schema_version") == _CACHE_SCHEMA_VERSION:
+                    return item.get("payload", item)
 
             # Resolved conversational prompts already encode exact prior-turn
             # state. A merely similar entry may belong to different context.
@@ -157,7 +165,11 @@ class SemanticCacheService:
                 except json.JSONDecodeError:
                     continue
 
-                if entry.get("tenant_id") != tenant_id or "embedding" not in entry:
+                if (
+                    entry.get("tenant_id") != tenant_id
+                    or entry.get("cache_schema_version") != _CACHE_SCHEMA_VERSION
+                    or "embedding" not in entry
+                ):
                     entries_checked += 1
                     continue
 
@@ -190,6 +202,7 @@ class SemanticCacheService:
             entry = {
                 "prompt": prompt,
                 "tenant_id": tenant_id,
+                "cache_schema_version": _CACHE_SCHEMA_VERSION,
                 "embedding": embedding,
                 "payload": payload,
             }

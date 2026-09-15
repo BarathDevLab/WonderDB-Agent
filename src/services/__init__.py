@@ -3,6 +3,7 @@
 from services.data_analysis import analyze_rows
 from services.conversation_context import build_conversation_context, format_context_for_model
 from services.request_requirements import (
+    is_schema_visualization_request,
     requested_visualizations_from_prompt,
     resolve_followup_visualizations,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "analyze_rows",
     "build_conversation_context",
     "format_context_for_model",
+    "is_schema_visualization_request",
     "requested_visualizations_from_prompt",
     "resolve_followup_visualizations",
     "verify_agent_response",

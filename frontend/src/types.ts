@@ -37,9 +37,10 @@ export interface ChartSpec {
 export interface DiagramSpec {
   mermaid?: string;
   diagram_type?: 'er' | 'process' | 'decision';
-  process_mode?: 'state_transitions' | 'ordered_steps' | 'agent_pipeline' | 'not_applicable';
+  process_mode?: 'state_transitions' | 'ordered_steps' | 'schema_flow' | 'not_applicable';
   decision_mode?: 'rule_hierarchy' | 'learned_classification' | 'not_applicable';
   decision_target?: string | null;
+  generation_basis?: 'schema_metadata' | 'schema_foreign_keys' | 'query_state_transitions' | 'query_ordered_steps' | 'query_rule_hierarchy' | 'query_labeled_outcomes' | 'none';
 }
 
 export interface ToolCall {

@@ -9,20 +9,81 @@ from mcp_server.server import (
 )
 
 
-def test_analytical_rows_render_agent_workflow_not_a_row_chain() -> None:
+SCHEMA = [
+    {
+        "table_name": "customers",
+        "columns": [{"name": "customer_id", "type": "integer", "is_pk": True}],
+        "foreign_keys": [],
+    },
+    {
+        "table_name": "orders",
+        "columns": [
+            {"name": "order_id", "type": "integer", "is_pk": True},
+            {"name": "customer_id", "type": "integer", "is_fk": True},
+        ],
+        "foreign_keys": [{
+            "column": "customer_id",
+            "foreign_table": "customers",
+            "foreign_column": "customer_id",
+        }],
+    },
+    {
+        "table_name": "order_items",
+        "columns": [{"name": "item_id", "type": "integer", "is_pk": True}],
+        "foreign_keys": [{
+            "column": "order_id",
+            "foreign_table": "orders",
+            "foreign_column": "order_id",
+        }],
+    },
+]
+
+
+def test_analytical_rows_render_actual_schema_flow_not_agent_workflow() -> None:
     rows = [
         {"month": "2026-02-01", "product_name": "Keyboard", "total_revenue": 150},
         {"month": "2026-03-01", "product_name": "Laptop", "total_revenue": 1200},
     ]
 
-    assert _detect_process_mode(rows) == "agent_pipeline"
-    mermaid = _build_process_flow(rows, "Explain revenue and show the process flow")
+    assert _detect_process_mode(rows, SCHEMA) == "schema_flow"
+    mermaid = _build_process_flow(
+        rows,
+        "Explain revenue and show the process flow",
+        schema=SCHEMA,
+    )
 
-    assert "Discover relevant schema" in mermaid
-    assert "All requested outputs delivered?" in mermaid
-    assert "Repair failed task" in mermaid
+    assert 'T0["customers<br/>PK: customer_id"]' in mermaid
+    assert "T0 -->" in mermaid
+    assert "orders.customer_id" in mermaid
+    assert "Discover relevant schema" not in mermaid
+    assert "Repair failed task" not in mermaid
     assert "2026-02-01" not in mermaid
-    assert "Revenue: 150" not in mermaid
+
+
+def test_analytical_rows_without_schema_relationships_are_not_a_process() -> None:
+    rows = [{"month": "2026-02-01", "total_revenue": 150}]
+
+    assert _detect_process_mode(rows, []) == "not_applicable"
+    mermaid = _build_process_flow(rows, "Show a process flow", schema=[])
+
+    assert "NOT_APPLICABLE" in mermaid
+    assert "Discover relevant schema" not in mermaid
+
+
+def test_er_relationship_cardinality_runs_from_parent_to_child() -> None:
+    result = json.loads(generate_flowchart("er", schema=SCHEMA))
+
+    assert 'CUSTOMERS ||--o{ ORDERS : "customer_id -> customer_id"' in result["mermaid"]
+    assert 'ORDERS ||--o{ ORDER_ITEMS : "order_id -> order_id"' in result["mermaid"]
+    assert result["generation_basis"] == "schema_metadata"
+
+
+def test_process_tool_reports_foreign_keys_as_generation_basis() -> None:
+    result = json.loads(generate_flowchart("process", raw_data=[], schema=SCHEMA))
+
+    assert result["process_mode"] == "schema_flow"
+    assert result["generation_basis"] == "schema_foreign_keys"
+    assert "customers" in result["mermaid"]
 
 
 def test_transition_rows_render_aggregated_state_flow() -> None:

@@ -51,15 +51,16 @@ def dynamic_viz_routing(state: GlobalState):
     Fan-out visualization tasks after sql_engine completes.
     Reads supervisor_plan.visualizations and dispatches parallel Send() calls.
 
-    Changed from string-prefix error detection to has_fatal_error sentinel.
-    Falls through to synthesize when:
-      - A fatal SQL error occurred (has_fatal_error)
-      - No visualization was requested or data is unavailable
+    A fatal query blocks only data-backed artifacts. ER diagrams and
+    FK-grounded schema flows continue independently when schema is available.
+    Falls through to synthesize when no requested artifact has usable input.
     """
-    # Use the structured sentinel — no more fragile string prefix matching
+    # A query failure blocks data-backed charts/trees, but schema diagrams are
+    # independent work and must still be fulfilled from retrieved metadata.
     if state.get("has_fatal_error"):
-        logger.info("dynamic_viz_routing: has_fatal_error is true -> routing to synthesize")
-        return "synthesize"
+        logger.info(
+            "dynamic_viz_routing: query failed; continuing with independent schema artifacts"
+        )
 
     plan = state.get("supervisor_plan", {})
     viz_required = plan.get("visualizations", [])
@@ -85,8 +86,12 @@ def dynamic_viz_routing(state: GlobalState):
         elif viz == "er_diagram":
             sends.append(Send("er_worker", {"schema": schemas}))
 
-        elif viz == "process_flow" and dataset:
-            sends.append(Send("process_worker", {"dataset": dataset, "title": prompt}))
+        elif viz == "process_flow":
+            sends.append(Send("process_worker", {
+                "dataset": dataset,
+                "schema": schemas,
+                "title": prompt,
+            }))
 
         elif viz == "decision_tree" and dataset:
             sends.append(Send("decision_worker", {"dataset": dataset, "title": prompt}))

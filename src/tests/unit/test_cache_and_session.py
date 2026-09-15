@@ -17,6 +17,21 @@ from services.semantic_cache import (
     set_semantic_cache,
 )
 from services.session_memory import session_memory_service
+from agent.nodes.supervisor_node import _cached_payload_satisfies_visualizations
+
+
+def test_cached_payload_must_contain_every_newly_requested_visualization() -> None:
+    cached = {
+        "chart_specs": [{"type": "line"}],
+        "diagram_spec": [{"diagram_type": "er"}],
+    }
+
+    assert _cached_payload_satisfies_visualizations(
+        cached, ["line_chart", "er_diagram"],
+    )
+    assert not _cached_payload_satisfies_visualizations(
+        cached, ["line_chart", "er_diagram", "process_flow"],
+    )
 
 
 @pytest.mark.asyncio

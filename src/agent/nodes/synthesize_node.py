@@ -296,7 +296,13 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
                 "tool": "verify_response", "status": "error", "duration_ms": 0,
             })
 
-    if cache_enabled and (raw_results or diagram_specs):
+    # Never cache a partial response. Otherwise one transient worker failure
+    # becomes a repeatable cache hit that keeps omitting the same artifact.
+    if (
+        cache_enabled
+        and response_verification.get("verified") is True
+        and (raw_results or diagram_specs)
+    ):
         try:
             await set_semantic_cache(
                 cache_prompt,

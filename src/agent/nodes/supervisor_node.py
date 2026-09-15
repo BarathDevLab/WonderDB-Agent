@@ -21,6 +21,7 @@ from services.semantic_cache import get_semantic_cache
 from services.session_memory import append_session_event, get_session_history
 from services.conversation_context import build_conversation_context, format_context_for_model
 from services.request_requirements import (
+    is_schema_visualization_request,
     requested_visualizations_from_prompt,
     resolve_followup_visualizations,
 )
@@ -59,8 +60,13 @@ Visualizations: Select chart types that best fit the data shape:
   • Comparison across groups   → "bar_chart"
   • Part-of-whole distribution → "pie_chart"
   • Two numeric dimensions     → "scatter_chart"
-  • Explicit process/workflow request → "process_flow"
-  • Explicit decision-tree request → "decision_tree"
+  • Explicit process/workflow/schema-flow request → "process_flow"
+    - State-transition columns produce a state flow.
+    - Ordered-step columns produce a workflow.
+    - Otherwise, real foreign keys produce a schema relationship flow.
+    - Never show the AI agent's internal execution pipeline as the user's process.
+  • Explicit decision-tree request → "decision_tree" only when the data contains
+    an explicit rule hierarchy or labeled outcomes suitable for classification.
   Only include a chart type if it genuinely adds insight.
   Never infer process or decision diagrams from ordinary time-series/category rows.
   Empty list [] is valid when the data is best shown as a table.
@@ -74,6 +80,8 @@ Examples:
   • "What tables exist in the database?"
   • "How are orders and customers related?"
 Visualizations: Include "er_diagram" if user explicitly requests it or it is implied.
+If the user explicitly asks for a schema/data flow, also include "process_flow";
+it will be grounded in foreign-key direction rather than invented business steps.
 needs_explanation: true
 
 ── CHAT (intent="chat") ─────────────────────────
@@ -120,6 +128,37 @@ OUTPUT RULES
 
 
 _MAX_PROMPT_CHARS = 2000
+
+
+def _cached_payload_satisfies_visualizations(
+    cached: dict[str, Any],
+    required: list[str],
+) -> bool:
+    """Reject semantically similar cache hits missing newly requested artifacts."""
+    if not required:
+        return True
+    cached_charts = cached.get("chart_specs") or (
+        [cached["chart_spec"]] if cached.get("chart_spec") else []
+    )
+    cached_diagrams = cached.get("diagram_spec") or []
+    if isinstance(cached_diagrams, dict):
+        cached_diagrams = [cached_diagrams]
+    delivered = {
+        f"{chart.get('type')}_chart"
+        for chart in cached_charts
+        if chart.get("type") in {"bar", "line", "pie", "scatter"}
+    }
+    diagram_names = {
+        "er": "er_diagram",
+        "process": "process_flow",
+        "decision": "decision_tree",
+    }
+    delivered.update(
+        diagram_names[diagram.get("diagram_type")]
+        for diagram in cached_diagrams
+        if diagram.get("diagram_type") in diagram_names
+    )
+    return set(required).issubset(delivered)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -244,6 +283,8 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     resolved_prompt = conversation_context.get("resolved_prompt", prompt)
     schema_prompt = conversation_context.get("schema_prompt", prompt)
     cache_prompt = resolved_prompt
+    explicit_visualizations = requested_visualizations_from_prompt(prompt)
+    schema_visualization_only = is_schema_visualization_request(prompt)
 
     # ── 3. Semantic cache gate ──────────────────────────────────────────────
     if cache_enabled:
@@ -255,6 +296,14 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
             )
         except Exception as exc:
             logger.warning("Semantic cache lookup failed, proceeding without cache: %s", exc)
+            cached = None
+
+        if cached and not _cached_payload_satisfies_visualizations(
+            cached, explicit_visualizations,
+        ):
+            logger.info(
+                "Semantic cache hit rejected because requested visualizations are missing"
+            )
             cached = None
 
         if cached:
@@ -301,13 +350,30 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     # ── 4a. Schema retrieval ────────────────────────────────────────────────
     try:
         pool = await get_shared_pool()
-        retrieved_schemas = await retrieve_schema_context(schema_prompt, tenant_id, pool)
+        retrieved_schemas = await retrieve_schema_context(
+            schema_prompt,
+            tenant_id,
+            pool,
+            prefer_full_catalog=(
+                schema_visualization_only
+                or "er_diagram" in explicit_visualizations
+            ),
+            fallback_to_catalog=True,
+        )
     except Exception as exc:
         logger.error("Schema retrieval failed: %s", exc)
         retrieved_schemas = []
 
     # ── 4b. LLM intent classification ──────────────────────────────────────
-    if not settings.gemini_api_key or not settings.gemini_model:
+    if schema_visualization_only:
+        # Schema visualization is fully deterministic and should not disappear
+        # because an intent-model call is slow, unavailable, or malformed.
+        plan = {
+            "intent": "schema",
+            "visualizations": explicit_visualizations,
+            "needs_explanation": True,
+        }
+    elif not settings.gemini_api_key or not settings.gemini_model:
         logger.error("Gemini API key or model not configured — cannot classify intent")
         return {
             "cached_hit": False,
@@ -318,17 +384,22 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
             "current_phase": "planning_failed",
         }
 
-    plan = await _classify_intent(
-        prompt=prompt,
-        api_key=settings.gemini_api_key,
-        model=settings.gemini_model,
-        conversation_context=conversation_context,
-    )
+    else:
+        plan = await _classify_intent(
+            prompt=prompt,
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_model,
+            conversation_context=conversation_context,
+        )
 
     if not plan:
         # Fallback: treat as a query so user gets a best-effort response
         logger.warning("Intent classification returned None — defaulting to query intent")
-        plan = {"intent": "query", "visualizations": [], "needs_explanation": True}
+        plan = {
+            "intent": "query",
+            "visualizations": explicit_visualizations,
+            "needs_explanation": True,
+        }
 
     plan["visualizations"] = resolve_followup_visualizations(
         prompt,
@@ -337,7 +408,9 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     )
 
     followup_kind = conversation_context.get("followup_kind")
-    if followup_kind == "data":
+    if schema_visualization_only:
+        plan["intent"] = "schema"
+    elif followup_kind == "data":
         plan["intent"] = "query"
         plan["needs_explanation"] = True
     elif followup_kind == "explanation":
