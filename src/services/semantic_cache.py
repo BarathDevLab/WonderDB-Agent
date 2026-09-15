@@ -115,6 +115,7 @@ class SemanticCacheService:
         tenant_id: str = "default",
         similarity_threshold: float | None = None,
         exact_only: bool = False,
+        schema_fingerprint: str = "",
     ) -> dict[str, Any] | None:
         threshold = similarity_threshold if similarity_threshold is not None else self._similarity_threshold
         exact_key = self._hash_key(prompt, tenant_id)
@@ -127,7 +128,9 @@ class SemanticCacheService:
             if data:
                 item = json.loads(data)
                 if item.get("cache_schema_version") == _CACHE_SCHEMA_VERSION:
-                    return item.get("payload", item)
+                    payload = item.get("payload", item)
+                    if not schema_fingerprint or payload.get("schema_fingerprint") == schema_fingerprint:
+                        return payload
 
             # Resolved conversational prompts already encode exact prior-turn
             # state. A merely similar entry may belong to different context.
@@ -178,7 +181,9 @@ class SemanticCacheService:
                     sim = _cosine_similarity(prompt_vec, cached_vec)
                     if sim > best_similarity:
                         best_similarity = sim
-                        best_payload = entry.get("payload")
+                        candidate = entry.get("payload")
+                        if not schema_fingerprint or candidate.get("schema_fingerprint") == schema_fingerprint:
+                            best_payload = candidate
 
                 entries_checked += 1
 
@@ -259,9 +264,11 @@ async def get_semantic_cache(
     tenant_id: str = "default",
     similarity_threshold: float = 0.75,
     exact_only: bool = False,
+    schema_fingerprint: str = "",
 ) -> dict[str, Any] | None:
     return await semantic_cache_service.get(
         prompt, tenant_id, similarity_threshold, exact_only=exact_only,
+        schema_fingerprint=schema_fingerprint,
     )
 
 

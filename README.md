@@ -66,9 +66,9 @@ For a data question, the application:
 
 ### Current execution model
 
-The implementation is a controlled workflow agent with parallel artifact workers. Each prompt has one primary route—`query`, `schema`, `chat`, or `contextual`—but every explicitly requested chart and diagram is preserved, dispatched, returned, rendered, and checked by `verify_response`. It is not yet a general DAG capable of planning several independent SQL queries in one turn.
+The implementation is a controlled workflow agent with a compiled request contract, a request-scoped task DAG, parallel artifact workers, and a verifier-controlled completion gate. Each prompt has one primary route—`query`, `schema`, `chat`, or `contextual`—while every explicitly requested chart and diagram is preserved as an independent tracked task. Missing or structurally invalid artifacts are selectively retried, and unresolved tasks are returned as explicit partial failures rather than silently omitted.
 
-The planned evolution is a task-and-artifact architecture: decompose a request into several tool tasks, execute dependency-ready tasks, record each table/chart/diagram as an artifact, recover individual failures with bounded retries, and verify that every requested artifact was delivered.
+One request can execute a query and concurrently produce several charts/diagrams plus deterministic analysis and explanation. Multiple unrelated analytical questions in one message still share one SQL execution; splitting those into separately planned SQL branches remains a future extension.
 
 ## Key features
 
@@ -86,7 +86,8 @@ The planned evolution is a task-and-artifact architecture: decompose a request i
 - `EXPLAIN` cost threshold, timeout, and row-limit controls.
 - PII masking by sensitive column name and common value patterns.
 - Deterministic totals, averages, trends, outliers, contributors, and data-quality checks.
-- Final requested-versus-delivered verification with explicit partial-result disclosure.
+- Structured request compilation, task ledger, artifact validation, selective recovery, and final requested-versus-delivered verification.
+- Request IDs, Redis execution checkpoints, schema-aware cache entries, MCP transport recovery, and execution traces.
 - Redis-backed semantic cache and session event history with in-memory fallbacks.
 - Bounded multi-turn context using the last three grounded turns, deterministic follow-up resolution, and tenant-scoped history filtering.
 - Multi-tenant PostgreSQL seed data and RLS policy definitions.
@@ -396,7 +397,7 @@ The source already contains the building blocks for a stronger agent, but these 
 | Session context | Browser session IDs are propagated to the backend; up to three distinct grounded turns, SQL, summaries, and bounded result samples support follow-ups. | Move to durable user-scoped conversation records if sessions must survive the Redis TTL or span devices. |
 | Tenant authorization | Tenant ID is supplied by the client. | Bind tenant scope to an authenticated principal on the server. |
 | Docker UI delivery | Compose runs the API, PostgreSQL, and Redis, but not a built React UI. | Add a frontend build stage or a separate frontend deployment service. |
-| Test verification | Local Python and npm execution must be available to run the existing test/build commands. | Add CI for backend tests, frontend build, multi-task workflows, retries, and tenant-isolation checks. |
+| Test verification | Golden, adversarial, artifact-integrity, checkpoint, cache-version, and MCP-recovery unit tests are included. | Run them in CI with live Postgres/Redis integration and tenant-isolation suites. |
 
 ## Troubleshooting
 
@@ -458,4 +459,4 @@ Then run `npm install` and `npm run dev` from `frontend/`.
 
 ## Project status
 
-This project is a feature-rich Text-to-SQL agent with parallel visualization generation, deterministic analysis, bounded SQL recovery, and final response verification. The next architectural milestone is a general task DAG for requests that require multiple independent SQL executions and dependent follow-up tasks.
+This project is a feature-rich Text-to-SQL agent with compiled request contracts, a task ledger, parallel visualization generation, deterministic analysis, selective artifact recovery, checkpoints, and final response verification. The next architectural milestone is scheduling multiple independent SQL branches when one prompt contains several unrelated analytical questions.

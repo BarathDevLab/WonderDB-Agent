@@ -19,6 +19,10 @@ class GlobalState(TypedDict, total=False):
     resolved_prompt: str
     cache_prompt: str
     conversation_context: dict[str, Any]
+    compiled_request: dict[str, Any]
+    request_id: str
+    request_fingerprint: str
+    schema_fingerprint: str
 
     # ── Set by supervisor_node ────────────────────────────────────────────
     supervisor_plan: dict[str, Any]
@@ -31,6 +35,9 @@ class GlobalState(TypedDict, total=False):
     sql_query: str          # Kept for caching / history / explain context
     data_analysis: dict[str, Any]  # Deterministic metrics produced by analyze_data
     response_verification: dict[str, Any]  # Final requested-vs-delivered artifact check
+    task_ledger: list[dict[str, Any]]
+    execution_status: str
+    artifact_validation: dict[str, Any]
 
     # ── Error sentinel (replaces fragile string-prefix matching) ─────────
     has_fatal_error: bool   # True when sql_engine encountered unrecoverable failure
@@ -44,6 +51,7 @@ class GlobalState(TypedDict, total=False):
     summary: str
     current_phase: str
     tool_calls: Annotated[list[dict[str, Any]], operator.add]
+    execution_trace: Annotated[list[dict[str, Any]], operator.add]
 
 
 class SQLSubgraphState(TypedDict, total=False):
@@ -56,6 +64,7 @@ class SQLSubgraphState(TypedDict, total=False):
     resolved_prompt: str
     error_message: str      # Passed to SQL gen on retry so it can self-correct
     prisma_context: str     # Formatted DDL from retrieved_schemas
+    compiled_request: dict[str, Any]
     generated_sql: str
     dataset: list[dict[str, Any]]
     db_error: str           # Set by execute_node on failure; cleared on success

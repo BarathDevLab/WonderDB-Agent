@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import asyncio
 import sys
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 # MCP client session singleton
 _mcp_session: Any | None = None
 _mcp_exit_stack: Any | None = None
+_mcp_restart_lock = asyncio.Lock()
 
 
 async def start_mcp_client() -> None:
@@ -90,3 +92,26 @@ async def get_mcp_session() -> Any:
             "was called during application startup."
         )
     return _mcp_session
+
+
+async def call_mcp_tool(
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    recover_transport: bool = True,
+) -> Any:
+    """Call an idempotent MCP tool and restart the local transport once if it died."""
+    global _mcp_session
+    session = await get_mcp_session()
+    try:
+        return await session.call_tool(tool_name, arguments=arguments)
+    except Exception:
+        if not recover_transport:
+            raise
+        async with _mcp_restart_lock:
+            if _mcp_session is session:
+                logger.warning("MCP transport failed during %s; restarting once", tool_name)
+                await stop_mcp_client()
+                await start_mcp_client()
+            replacement = await get_mcp_session()
+        return await replacement.call_tool(tool_name, arguments=arguments)

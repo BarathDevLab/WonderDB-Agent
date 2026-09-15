@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     gemini_embedding_model: str = Field(default="", alias="GEMINI_EMBEDDING_MODEL")
     app_api_key: str = Field(default="", alias="APP_API_KEY")
     max_prompt_length: int = Field(default=2000, alias="MAX_PROMPT_LENGTH")
+    max_artifact_repair_rounds: int = Field(default=2, alias="MAX_ARTIFACT_REPAIR_ROUNDS")
 
     def model_post_init(self, __context: Any) -> None:
         if self.database_url:

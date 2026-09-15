@@ -21,11 +21,18 @@ import json
 import time
 from typing import Any
 
-from agent.mcp_client import get_mcp_session
+from agent.mcp_client import call_mcp_tool, get_mcp_session
 from agent.state import GlobalState
 from app.config import get_settings
 from services.semantic_cache import set_semantic_cache
 from services.session_memory import append_session_event
+from services.artifact_validation import (
+    deduplicate_visualizations,
+    validate_visualization,
+    visual_for_artifact,
+)
+from services.response_verification import requested_artifacts
+from services.task_ledger import build_task_ledger, finalize_task_ledger, ledger_status
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -33,9 +40,79 @@ logger = get_logger(__name__)
 
 async def _call_tool(session: Any, tool_name: str, arguments: dict) -> dict[str, Any]:
     """Call an MCP tool and return the parsed JSON response."""
-    result = await session.call_tool(tool_name, arguments=arguments)
+    try:
+        result = await session.call_tool(tool_name, arguments=arguments)
+    except Exception:
+        result = await call_mcp_tool(tool_name, arguments)
     raw_text = result.content[0].text if result.content else "{}"
     return json.loads(raw_text)
+
+
+async def _recover_visualizations(
+    state: GlobalState,
+    visualizations: list[dict[str, Any]],
+    max_rounds: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Verifier-controlled selective retry for missing/invalid visual outputs."""
+    from agent.nodes.worker_nodes import (
+        chart_worker_node,
+        decision_worker_node,
+        er_worker_node,
+        process_worker_node,
+    )
+
+    plan = state.get("supervisor_plan", {})
+    prompt = state.get("prompt", "")
+    requested = requested_artifacts(plan, bool(state.get("clean_dataset")), prompt)
+    requested_visuals = [
+        item for item in requested
+        if item.endswith("_chart") or item in {"er_diagram", "process_flow", "decision_tree"}
+    ]
+    effective = list(visualizations)
+    calls: list[dict[str, Any]] = []
+    dataset = state.get("clean_dataset", [])
+    schema = state.get("retrieved_schemas", [])
+
+    for repair_round in range(1, max(0, max_rounds) + 1):
+        invalid = [
+            artifact for artifact in requested_visuals
+            if not validate_visualization(
+                artifact, visual_for_artifact(artifact, effective),
+            )["valid"]
+        ]
+        if not invalid:
+            break
+        logger.warning("Artifact completion gate retry round %s: %s", repair_round, invalid)
+        made_progress = False
+        for artifact in invalid:
+            if artifact.endswith("_chart"):
+                if not dataset:
+                    continue
+                result = await chart_worker_node({
+                    "dataset": dataset,
+                    "chart_type": artifact.removesuffix("_chart"),
+                    "request": prompt,
+                })
+            elif artifact == "er_diagram":
+                result = await er_worker_node({"schema": schema})
+            elif artifact == "process_flow":
+                result = await process_worker_node({
+                    "dataset": dataset, "schema": schema, "title": prompt,
+                })
+            elif artifact == "decision_tree":
+                if not dataset:
+                    continue
+                result = await decision_worker_node({"dataset": dataset, "title": prompt})
+            else:
+                continue
+            produced = result.get("visualizations", [])
+            effective.extend(produced)
+            for call in result.get("tool_calls", []):
+                calls.append({**call, "artifact": artifact, "repair_round": repair_round})
+            made_progress = made_progress or bool(produced)
+        if not made_progress:
+            break
+    return deduplicate_visualizations(effective), calls
 
 
 def _build_explain_prompt(
@@ -159,6 +236,9 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
             t0 = time.monotonic()
             verification = await _call_tool(verification_session, "verify_response", {
                 "supervisor_plan": plan,
+                "sql_query": sql_query,
+                "raw_data": raw_results,
+                "visualizations": state.get("visualizations", []),
                 "summary": friendly,
                 "schema_available": bool(retrieved_schemas),
                 "fatal_error": error_detail or "Query execution failed.",
@@ -179,10 +259,27 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
             "summary": friendly, "error": error_detail,
             "verification_status": verification.get("status", "unavailable"),
         })
+        fatal_calls = list(state.get("tool_calls", [])) + verification_calls
+        task_ledger = finalize_task_ledger(
+            state.get("task_ledger") or build_task_ledger(plan, prompt),
+            sql_query=sql_query,
+            raw_data=raw_results,
+            visualizations=state.get("visualizations", []),
+            summary=friendly,
+            data_analysis={},
+            schema_available=bool(retrieved_schemas),
+            verification=verification,
+            tool_calls=fatal_calls,
+        )
         return {
             "summary": friendly,
             "response_verification": verification,
             "tool_calls": verification_calls,
+            "task_ledger": task_ledger,
+            "execution_status": "failed",
+            "execution_trace": [{
+                "phase": "completion_gate", "status": "failed", "error": error_detail,
+            }],
             "current_phase": "complete",
         }
 
@@ -192,7 +289,8 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
     # We build a fresh list and return it as the delta.
     extra_tool_calls: list[dict[str, Any]] = []
 
-    visualizations = state.get("visualizations", [])
+    original_visualizations = state.get("visualizations", [])
+    visualizations = list(original_visualizations)
     chart_specs = [v for v in visualizations if "type" in v]
     chart_spec = chart_specs[0] if chart_specs else {}
     diagram_specs = [v for v in visualizations if "diagram_type" in v]
@@ -203,6 +301,22 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
     except RuntimeError as exc:
         logger.error("synthesize_node: MCP session unavailable: %s", exc)
         session = None
+
+    # A first deterministic validation pass drives selective artifact recovery.
+    # The workers remain independent, so one broken chart does not regenerate
+    # the query, ER diagram, or other already-valid deliverables.
+    visualizations, recovery_calls = await _recover_visualizations(
+        state,
+        visualizations,
+        settings.max_artifact_repair_rounds,
+    )
+    extra_tool_calls.extend(recovery_calls)
+    recovered_visualizations = [
+        visual for visual in visualizations if visual not in original_visualizations
+    ]
+    chart_specs = [v for v in visualizations if "type" in v]
+    chart_spec = chart_specs[0] if chart_specs else {}
+    diagram_specs = [v for v in visualizations if "diagram_type" in v]
 
     # Ground the narrative in deterministic calculations before involving an
     # LLM. Failure is non-fatal: raw rows and other artifacts remain usable.
@@ -296,6 +410,20 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
                 "tool": "verify_response", "status": "error", "duration_ms": 0,
             })
 
+    final_calls = list(state.get("tool_calls", [])) + extra_tool_calls
+    task_ledger = finalize_task_ledger(
+        state.get("task_ledger") or build_task_ledger(plan, prompt),
+        sql_query=sql_query,
+        raw_data=raw_results,
+        visualizations=visualizations,
+        summary=summary,
+        data_analysis=data_analysis,
+        schema_available=bool(retrieved_schemas),
+        verification=response_verification,
+        tool_calls=final_calls,
+    )
+    execution_status = ledger_status(task_ledger)
+
     # Never cache a partial response. Otherwise one transient worker failure
     # becomes a repeatable cache hit that keeps omitting the same artifact.
     if (
@@ -315,6 +443,11 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
                     "raw_results": raw_results,
                     "data_analysis": data_analysis,
                     "response_verification": response_verification,
+                    "schema_fingerprint": state.get("schema_fingerprint", ""),
+                    "supervisor_plan": plan,
+                    "compiled_request": state.get("compiled_request", {}),
+                    "task_ledger": task_ledger,
+                    "execution_status": execution_status,
                 },
                 tenant_id,
             )
@@ -340,6 +473,7 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
             "result_sample": result_sample,
             "analysis_available": bool(data_analysis),
             "verification_status": response_verification.get("status", "unavailable"),
+            "execution_status": execution_status,
         })
     except Exception as exc:
         logger.warning("Session memory append failed: %s", exc)
@@ -350,6 +484,15 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
         "summary": summary,
         "data_analysis": data_analysis,
         "response_verification": response_verification,
+        "task_ledger": task_ledger,
+        "execution_status": execution_status,
+        "visualizations": recovered_visualizations,
         "tool_calls": extra_tool_calls,
+        "execution_trace": [{
+            "phase": "completion_gate",
+            "status": execution_status,
+            "recovered_artifacts": len(recovered_visualizations),
+            "verification": response_verification.get("status", "unavailable"),
+        }],
         "current_phase": "complete",
     }

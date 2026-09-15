@@ -16,11 +16,13 @@ _REFERENCE_PATTERNS = (
     r"^(?:show|make|render|visualize)\s+(?:a|an|the)\s+(?:bar|line|pie|scatter)\b",
     r"^(?:which (?:one|ones|had|has|was|were)|who (?:was|were)|why (?:did|was|were)|where (?:did|was|were)|when (?:did|was|were))\b",
     r"\b(?:the|that)\s+(?:increase|decrease|spike|drop|trend|result|number|total|value|chart)\b",
+    r"\b(?:summari[sz]e|summary|recap|key takeaways?|main findings?|everything so far|conversation so far)\b",
 )
 _EXPLANATION_PATTERNS = (
     r"\b(?:explain|elaborate|clarify|simpler|plain english|break it down)\b",
     r"\bwhat does (?:it|that|this) mean\b",
     r"^(?:tell me more|continue|go on)\b",
+    r"\b(?:summari[sz]e|summary|recap|key takeaways?|main findings?)\b",
 )
 _DATA_MODIFIER_PATTERNS = (
     r"\b(?:chart|graph|plot|diagram|table)\b",
@@ -51,7 +53,7 @@ def _latest_grounded_turn(history: list[dict[str, Any]]) -> dict[str, Any] | Non
 
 
 def _recent_grounded_turns(
-    history: list[dict[str, Any]], limit: int = 3,
+    history: list[dict[str, Any]], limit: int = 6,
 ) -> list[dict[str, Any]]:
     """Return distinct recent turns in chronological order, preferring summaries."""
     selected: list[dict[str, Any]] = []

@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
@@ -9,6 +10,7 @@ from agent.graph import get_graph
 from agent.sse import run_langgraph_sse
 from agent.state import GlobalState
 from core.sse_formatter import format_sse_event
+from services.execution_control import request_fingerprint
 
 
 router = APIRouter(tags=["agent"])
@@ -19,6 +21,7 @@ class ChatStreamRequest(BaseModel):
     tenant_id: str = Field(default="default-tenant", max_length=64, description="Active tenant UUID")
     user_id: str = Field(default="anonymous", max_length=128, description="Authenticated user ID")
     session_id: str | None = Field(default=None, max_length=128, description="Optional session conversation ID")
+    request_id: str | None = Field(default=None, max_length=128, description="Optional idempotency/resume ID")
 
 
 async def _generate_sse_stream(initial_state: GlobalState) -> AsyncIterator[str]:
@@ -37,16 +40,22 @@ async def stream_agent_get(
     tenant_id: str = Query(default="default-tenant", max_length=64),
     user_id: str = Query(default="anonymous"),
     session_id: str | None = Query(default=None),
+    request_id: str | None = Query(default=None),
 ) -> StreamingResponse:
     """Stream live LangGraph Text-to-SQL state transitions over HTTP/2 SSE."""
     sid = session_id or f"session-{tenant_id}"
     # Bug fix: removed retry_count — it belongs to SQLSubgraphState only,
     # not GlobalState. Injecting it here was silently polluting global state.
+    rid = request_id or str(uuid4())
     initial_state: GlobalState = {
         "prompt": prompt,
         "tenant_id": tenant_id,
         "user_id": user_id,
         "session_id": sid,
+        "request_id": rid,
+        "request_fingerprint": request_fingerprint(
+            tenant_id=tenant_id, user_id=user_id, session_id=sid, prompt=prompt,
+        ),
     }
     return StreamingResponse(
         _generate_sse_stream(initial_state),
@@ -64,11 +73,19 @@ async def stream_agent_post(request: ChatStreamRequest) -> StreamingResponse:
     """POST variant for streaming with complex query payloads."""
     sid = request.session_id or f"session-{request.tenant_id}"
     # Bug fix: removed retry_count — it belongs to SQLSubgraphState only.
+    rid = request.request_id or str(uuid4())
     initial_state: GlobalState = {
         "prompt": request.prompt,
         "tenant_id": request.tenant_id,
         "user_id": request.user_id,
         "session_id": sid,
+        "request_id": rid,
+        "request_fingerprint": request_fingerprint(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            session_id=sid,
+            prompt=request.prompt,
+        ),
     }
     return StreamingResponse(
         _generate_sse_stream(initial_state),

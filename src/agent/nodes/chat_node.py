@@ -51,6 +51,10 @@ _EXPLAIN_KEYWORDS = [
     "what does this mean", "what does that mean",
     "break it down", "break this down",
 ]
+_SUMMARY_KEYWORDS = [
+    "summarize", "summarise", "summary", "recap", "key takeaways",
+    "main findings", "everything so far", "conversation so far",
+]
 
 
 def _looks_like_identity_question(prompt: str) -> bool:
@@ -153,7 +157,15 @@ async def chat_node(state: GlobalState) -> GlobalState:
             ]
             context = _build_context_from_history(history)
 
-        if any(kw in prompt_lower for kw in _SIMPLER_KEYWORDS):
+        if any(kw in prompt_lower for kw in _SUMMARY_KEYWORDS):
+            system_msg = (
+                "You are a senior data analyst summarizing the grounded turns in the current "
+                "database conversation. Cover every distinct result present in the supplied "
+                "context, consolidate repeated findings, preserve important numbers, and clearly "
+                "separate findings from limitations. Do not claim there is nothing to summarize "
+                "when grounded turns are supplied. Do not invent facts outside that context."
+            )
+        elif any(kw in prompt_lower for kw in _SIMPLER_KEYWORDS):
             system_msg = (
                 "You are a friendly data analyst. The user wants you to re-explain "
                 "the previous database query result in very simple, non-technical, "
@@ -222,6 +234,10 @@ async def chat_node(state: GlobalState) -> GlobalState:
         user_content = prompt
 
     reply = await _call_gemini(system_msg, user_content)
+    task_ledger = [
+        {**task, "status": "completed", "attempts": 1}
+        for task in state.get("task_ledger", [])
+    ]
 
     await append_session_event(session_id, {
         "phase": "chat",
@@ -234,4 +250,7 @@ async def chat_node(state: GlobalState) -> GlobalState:
     return {
         "summary": reply,
         "current_phase": "chat_complete",
+        "task_ledger": task_ledger,
+        "execution_status": "complete",
+        "execution_trace": [{"phase": "chat_response", "status": "completed"}],
     }

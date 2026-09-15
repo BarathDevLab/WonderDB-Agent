@@ -13,7 +13,7 @@ import re
 import time
 from typing import Any
 
-from agent.mcp_client import get_mcp_session
+from agent.mcp_client import call_mcp_tool
 from agent.state import SQLSubgraphState
 from utils.logger import get_logger
 
@@ -62,10 +62,8 @@ async def execute_node(state: SQLSubgraphState) -> SQLSubgraphState:
     t0 = time.monotonic()
     try:
         logger.info(f"Executing SQL via MCP for tenant {tenant_id}: {sql}")
-        session = await get_mcp_session()
-        result = await session.call_tool(
-            "execute_query",
-            arguments={"sql": sql, "tenant_id": tenant_id},
+        result = await call_mcp_tool(
+            "execute_query", {"sql": sql, "tenant_id": tenant_id},
         )
         duration_ms = round((time.monotonic() - t0) * 1000, 1)
 

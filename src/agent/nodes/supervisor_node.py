@@ -16,7 +16,7 @@ from typing import Any
 from agent.state import GlobalState
 from app.config import get_settings
 from db.postgres import get_shared_pool
-from services.schema_rag import retrieve_schema_context
+from services.schema_rag import retrieve_schema_context, schema_rag_service
 from services.semantic_cache import get_semantic_cache
 from services.session_memory import append_session_event, get_session_history
 from services.conversation_context import build_conversation_context, format_context_for_model
@@ -25,6 +25,9 @@ from services.request_requirements import (
     requested_visualizations_from_prompt,
     resolve_followup_visualizations,
 )
+from services.task_ledger import build_task_ledger, finalize_task_ledger
+from services.request_compiler import compile_request
+from services.execution_control import schema_fingerprint
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -266,7 +269,7 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     if not prompt:
         return {
             "supervisor_plan": {"intent": "error", "visualizations": [], "needs_explanation": False},
-            "has_fatal_error": False,
+            "has_fatal_error": True,
             "error_detail": "",
             "current_phase": "planning_complete",
         }
@@ -285,6 +288,7 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     cache_prompt = resolved_prompt
     explicit_visualizations = requested_visualizations_from_prompt(prompt)
     schema_visualization_only = is_schema_visualization_request(prompt)
+    current_schema_fingerprint = schema_fingerprint(schema_rag_service._live_catalog)
 
     # ── 3. Semantic cache gate ──────────────────────────────────────────────
     if cache_enabled:
@@ -293,6 +297,7 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
                 cache_prompt,
                 tenant_id,
                 exact_only=conversation_context.get("is_followup", False),
+                schema_fingerprint=current_schema_fingerprint,
             )
         except Exception as exc:
             logger.warning("Semantic cache lookup failed, proceeding without cache: %s", exc)
@@ -328,6 +333,25 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
             viz.extend(cached_charts)
             for d in cached_diagrams:
                 viz.append(d)
+            cached_plan = cached.get("supervisor_plan") or {
+                "intent": "query",
+                "visualizations": explicit_visualizations,
+                "needs_explanation": bool(cached.get("summary")),
+            }
+            cached_compiled_request = cached.get("compiled_request") or compile_request(
+                prompt, conversation_context, cached_plan,
+            )
+            cached_task_ledger = cached.get("task_ledger") or finalize_task_ledger(
+                build_task_ledger(cached_plan, prompt),
+                sql_query=cached.get("sql_query", ""),
+                raw_data=cached.get("raw_results", []),
+                visualizations=viz,
+                summary=cached.get("summary", ""),
+                data_analysis=cached.get("data_analysis", {}),
+                schema_available=bool(current_schema_fingerprint),
+                verification=cached.get("response_verification", {}),
+                tool_calls=[],
+            )
 
             return {
                 "cached_hit": True,
@@ -340,11 +364,16 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
                 "has_fatal_error": False,
                 "error_detail": "",
                 # Cache hit bypasses all workers; supervisor_plan not used for routing
-                "supervisor_plan": {"intent": "query", "visualizations": [], "needs_explanation": False},
+                "supervisor_plan": cached_plan,
                 "current_phase": "planning_complete",
                 "resolved_prompt": resolved_prompt,
                 "cache_prompt": cache_prompt,
                 "conversation_context": conversation_context,
+                "schema_fingerprint": current_schema_fingerprint,
+                "execution_status": "complete",
+                "execution_trace": [{"phase": "cache", "status": "hit"}],
+                "compiled_request": cached_compiled_request,
+                "task_ledger": cached_task_ledger,
             }
 
     # ── 4a. Schema retrieval ────────────────────────────────────────────────
@@ -363,6 +392,9 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
     except Exception as exc:
         logger.error("Schema retrieval failed: %s", exc)
         retrieved_schemas = []
+    current_schema_fingerprint = schema_fingerprint(
+        schema_rag_service._live_catalog or retrieved_schemas
+    )
 
     # ── 4b. LLM intent classification ──────────────────────────────────────
     if schema_visualization_only:
@@ -379,7 +411,7 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
             "cached_hit": False,
             "retrieved_schemas": retrieved_schemas,
             "supervisor_plan": {"intent": "error", "visualizations": [], "needs_explanation": False},
-            "has_fatal_error": False,
+            "has_fatal_error": True,
             "error_detail": "LLM configuration missing.",
             "current_phase": "planning_failed",
         }
@@ -418,6 +450,15 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
         plan["visualizations"] = []
         plan["needs_explanation"] = True
 
+    compiled_request = compile_request(prompt, conversation_context, plan)
+    planning_error = ""
+    if compiled_request["operation"] == "rejected_write":
+        plan = {"intent": "error", "visualizations": [], "needs_explanation": False}
+        compiled_request["intent"] = "error"
+        compiled_request["requested_artifacts"] = []
+        planning_error = "Only read-only database requests are allowed."
+    task_ledger = build_task_ledger(plan, prompt)
+
     await append_session_event(session_id, {
         "phase": "plan",
         "prompt": prompt,
@@ -432,10 +473,20 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
         "cached_hit": False,
         "retrieved_schemas": retrieved_schemas,
         "supervisor_plan": plan,
-        "has_fatal_error": False,
-        "error_detail": "",
+        "has_fatal_error": bool(planning_error),
+        "error_detail": planning_error,
         "current_phase": "planning_complete",
         "resolved_prompt": resolved_prompt,
         "cache_prompt": cache_prompt,
         "conversation_context": conversation_context,
+        "task_ledger": task_ledger,
+        "execution_status": "running",
+        "compiled_request": compiled_request,
+        "schema_fingerprint": current_schema_fingerprint,
+        "execution_trace": [{
+            "phase": "planning",
+            "status": "completed",
+            "intent": plan.get("intent", "query"),
+            "tasks": len(task_ledger),
+        }],
     }

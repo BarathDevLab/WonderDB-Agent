@@ -7,9 +7,9 @@ _src_root = str(Path(__file__).resolve().parent.parent)
 if _src_root not in sys.path:
     sys.path.insert(0, _src_root)
 
-import asyncpg
+import asyncpg  # noqa: E402
 
-from app.config import get_settings
+from app.config import get_settings  # noqa: E402
 
 
 class MigrationManager:
@@ -59,7 +59,7 @@ class MigrationManager:
         """Discover and execute pending SQL migration files in numerical order."""
         cfg = settings or get_settings()
         await self._ensure_database_exists(cfg)
-        print(f"Connecting to PostgreSQL database via DSN...")
+        print("Connecting to PostgreSQL database via DSN...")
 
         conn = await asyncpg.connect(dsn=cfg.postgres_dsn)
 

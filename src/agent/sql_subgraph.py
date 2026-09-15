@@ -88,6 +88,7 @@ async def sql_engine_wrapper(state: GlobalState) -> dict:
         "retry_count": 0,
         "error_message": "",
         "tool_calls": [],
+        "compiled_request": state.get("compiled_request", {}),
     }
 
     logger.info("sql_engine_wrapper: Invoking SQL subgraph")
@@ -107,4 +108,9 @@ async def sql_engine_wrapper(state: GlobalState) -> dict:
         # Keep summary empty here; synthesize_node is responsible for final text
         "summary": "",
         "current_phase": "sql_engine_complete",
+        "execution_trace": [{
+            "phase": "query_execution",
+            "status": "failed" if has_fatal else "completed",
+            "retry_count": result.get("retry_count", 0),
+        }],
     }

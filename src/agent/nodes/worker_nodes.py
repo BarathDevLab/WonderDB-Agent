@@ -12,14 +12,17 @@ import json
 import time
 from typing import Any
 
-from agent.mcp_client import get_mcp_session
+from agent.mcp_client import call_mcp_tool, get_mcp_session
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 async def _call_tool(session: Any, tool_name: str, arguments: dict) -> Any:
     """Call an MCP tool and return parsed JSON response."""
-    result = await session.call_tool(tool_name, arguments=arguments)
+    try:
+        result = await session.call_tool(tool_name, arguments=arguments)
+    except Exception:
+        result = await call_mcp_tool(tool_name, arguments)
     raw_text = result.content[0].text if result.content else "{}"
     return json.loads(raw_text)
 
@@ -89,11 +92,15 @@ async def chart_worker_node(state: dict[str, Any]) -> dict[str, Any]:
             "tool_calls": [{
                 "tool": "generate_chart", "status": "done",
                 "duration_ms": duration_ms, "attempts": attempts,
+                "artifact": f"{chart_type}_chart",
             }]
         }
     except Exception as exc:
         logger.warning("generate_chart worker failed: %s", exc)
-        return {"visualizations": [], "tool_calls": [{"tool": "generate_chart", "status": "error", "duration_ms": 0}]}
+        return {"visualizations": [], "tool_calls": [{
+            "tool": "generate_chart", "status": "error", "duration_ms": 0,
+            "artifact": f"{chart_type}_chart",
+        }]}
 
 
 async def er_worker_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -115,12 +122,15 @@ async def er_worker_node(state: dict[str, Any]) -> dict[str, Any]:
             "visualizations": [er_spec],
             "tool_calls": schema_calls + [{
                 "tool": "generate_flowchart[er]", "status": "done",
-                "duration_ms": duration_ms, "attempts": attempts,
+                "duration_ms": duration_ms, "attempts": attempts, "artifact": "er_diagram",
             }]
         }
     except Exception as exc:
         logger.warning("generate_flowchart(er) worker failed: %s", exc)
-        return {"visualizations": [], "tool_calls": [{"tool": "generate_flowchart[er]", "status": "error", "duration_ms": 0}]}
+        return {"visualizations": [], "tool_calls": [{
+            "tool": "generate_flowchart[er]", "status": "error", "duration_ms": 0,
+            "artifact": "er_diagram",
+        }]}
 
 
 async def process_worker_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -160,12 +170,15 @@ async def process_worker_node(state: dict[str, Any]) -> dict[str, Any]:
             "visualizations": [process_spec],
             "tool_calls": schema_calls + [{
                 "tool": "generate_flowchart[process]", "status": "done",
-                "duration_ms": duration_ms, "attempts": attempts,
+                "duration_ms": duration_ms, "attempts": attempts, "artifact": "process_flow",
             }]
         }
     except Exception as exc:
         logger.warning("generate_flowchart(process) worker failed: %s", exc)
-        return {"visualizations": [], "tool_calls": [{"tool": "generate_flowchart[process]", "status": "error", "duration_ms": 0}]}
+        return {"visualizations": [], "tool_calls": [{
+            "tool": "generate_flowchart[process]", "status": "error", "duration_ms": 0,
+            "artifact": "process_flow",
+        }]}
 
 
 async def decision_worker_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -191,9 +204,12 @@ async def decision_worker_node(state: dict[str, Any]) -> dict[str, Any]:
             "visualizations": [decision_spec],
             "tool_calls": [{
                 "tool": "generate_flowchart[decision]", "status": "done",
-                "duration_ms": duration_ms, "attempts": attempts,
+                "duration_ms": duration_ms, "attempts": attempts, "artifact": "decision_tree",
             }]
         }
     except Exception as exc:
         logger.warning("generate_flowchart(decision) worker failed: %s", exc)
-        return {"visualizations": [], "tool_calls": [{"tool": "generate_flowchart[decision]", "status": "error", "duration_ms": 0}]}
+        return {"visualizations": [], "tool_calls": [{
+            "tool": "generate_flowchart[decision]", "status": "error", "duration_ms": 0,
+            "artifact": "decision_tree",
+        }]}

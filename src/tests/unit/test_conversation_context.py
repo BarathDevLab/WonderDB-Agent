@@ -51,21 +51,37 @@ def test_independent_question_is_not_merged_with_previous_turn() -> None:
     assert context["resolved_prompt"] == "List customers with overdue invoices"
 
 
-def test_model_context_contains_last_three_distinct_grounded_turns() -> None:
+def test_model_context_contains_last_six_distinct_grounded_turns() -> None:
     history = [
         _summary("Question one", "SELECT 1", "Answer one"),
         _summary("Question two", "SELECT 2", "Answer two"),
         _summary("Question three", "SELECT 3", "Answer three"),
         _summary("Question four", "SELECT 4", "Answer four"),
+        _summary("Question five", "SELECT 5", "Answer five"),
+        _summary("Question six", "SELECT 6", "Answer six"),
+        _summary("Question seven", "SELECT 7", "Answer seven"),
     ]
     context = build_conversation_context(history, "Compare that with the previous year")
     formatted = format_context_for_model(context)
 
     assert "Question one" not in formatted
     assert "Question two" in formatted
-    assert "Question three" in formatted
-    assert "Question four" in formatted
-    assert formatted.index("Question two") < formatted.index("Question four")
+    assert "Question seven" in formatted
+    assert formatted.index("Question two") < formatted.index("Question seven")
+
+
+def test_standalone_summarize_uses_grounded_conversation_context() -> None:
+    history = [
+        _summary("Show revenue", "SELECT SUM(revenue) FROM orders", "Revenue is 100."),
+        _summary("Show churn", "SELECT AVG(churn) FROM customers", "Churn is 5%."),
+    ]
+    context = build_conversation_context(history, "Summarize everything so far")
+    formatted = format_context_for_model(context)
+
+    assert context["is_followup"] is True
+    assert context["followup_kind"] == "explanation"
+    assert "Show revenue" in formatted
+    assert "Show churn" in formatted
 
 
 def test_subjectless_chart_request_uses_previous_query_context() -> None:

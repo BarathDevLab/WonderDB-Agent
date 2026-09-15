@@ -57,7 +57,8 @@ def dynamic_viz_routing(state: GlobalState):
     """
     # A query failure blocks data-backed charts/trees, but schema diagrams are
     # independent work and must still be fulfilled from retrieved metadata.
-    if state.get("has_fatal_error"):
+    query_failed = bool(state.get("has_fatal_error"))
+    if query_failed:
         logger.info(
             "dynamic_viz_routing: query failed; continuing with independent schema artifacts"
         )
@@ -71,14 +72,15 @@ def dynamic_viz_routing(state: GlobalState):
 
     sends = []
     dataset = state.get("clean_dataset", [])
+    usable_dataset = [] if query_failed else dataset
     schemas = state.get("retrieved_schemas", [])
     prompt = state.get("prompt", "")
 
     for viz in viz_required:
-        if viz.endswith("_chart") and dataset:
+        if viz.endswith("_chart") and usable_dataset:
             chart_type = viz.replace("_chart", "")
             sends.append(Send("chart_worker", {
-                "dataset": dataset,
+                "dataset": usable_dataset,
                 "chart_type": chart_type,
                 "request": prompt,
             }))
@@ -88,13 +90,16 @@ def dynamic_viz_routing(state: GlobalState):
 
         elif viz == "process_flow":
             sends.append(Send("process_worker", {
-                "dataset": dataset,
+                "dataset": usable_dataset,
                 "schema": schemas,
                 "title": prompt,
             }))
 
-        elif viz == "decision_tree" and dataset:
-            sends.append(Send("decision_worker", {"dataset": dataset, "title": prompt}))
+        elif viz == "decision_tree" and usable_dataset:
+            sends.append(Send("decision_worker", {
+                "dataset": usable_dataset,
+                "title": prompt,
+            }))
 
     # No qualifying sends (e.g. schema viz requested but no schema retrieved)
     if not sends:

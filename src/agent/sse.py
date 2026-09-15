@@ -17,6 +17,8 @@ from typing import Any
 from agent.state import GlobalState
 from core.sse_formatter import format_sse_event
 from utils.logger import get_logger
+from services.artifact_validation import deduplicate_visualizations
+from services.execution_control import load_execution_checkpoint, save_execution_checkpoint
 
 logger = get_logger(__name__)
 
@@ -29,12 +31,35 @@ async def run_langgraph_sse(
 ) -> AsyncIterator[str]:
     """Stream LangGraph state transitions as typed SSE frames without buffering."""
     logger.info("SSE Stream starting")
+    request_id = initial_state.get("request_id", "")
+    request_hash = initial_state.get("request_fingerprint", "")
+    if request_id:
+        try:
+            checkpoint = await load_execution_checkpoint(request_id)
+            if (
+                checkpoint
+                and checkpoint.get("status") == "complete"
+                and checkpoint.get("request_fingerprint") == request_hash
+                and checkpoint.get("final_response")
+            ):
+                yield format_sse_event("status", {
+                    "phase": "resumed", "message": "Returning completed idempotent request.",
+                })
+                yield format_sse_event("final_response", checkpoint["final_response"])
+                yield format_sse_event("complete", {"ok": True, "request_id": request_id})
+                return
+        except Exception as exc:
+            logger.warning("Checkpoint lookup failed; starting normal execution: %s", exc)
     yield format_sse_event(
         "status",
         {"phase": "planning", "message": "Analyzing prompt and retrieving schema..."},
     )
 
     local_visualizations = []
+    local_trace: list[dict[str, Any]] = []
+    latest_task_ledger: list[dict[str, Any]] = []
+    compiled_request: dict[str, Any] = {}
+    local_tool_calls: list[dict[str, Any]] = []
 
     async for chunk in graph.astream(initial_state, stream_mode=stream_mode):
         if not isinstance(chunk, dict):
@@ -47,6 +72,25 @@ async def run_langgraph_sse(
 
             if "visualizations" in state_update:
                 local_visualizations.extend(state_update["visualizations"])
+            if "execution_trace" in state_update:
+                local_trace.extend(state_update["execution_trace"])
+            if state_update.get("task_ledger"):
+                latest_task_ledger = state_update["task_ledger"]
+            if state_update.get("compiled_request"):
+                compiled_request = state_update["compiled_request"]
+            if state_update.get("tool_calls"):
+                local_tool_calls.extend(state_update["tool_calls"])
+
+            if request_id:
+                try:
+                    await save_execution_checkpoint(request_id, {
+                        "status": "running",
+                        "request_fingerprint": request_hash,
+                        "last_node": node_name,
+                        "execution_trace": local_trace,
+                    })
+                except Exception as exc:
+                    logger.warning("Checkpoint write failed at %s: %s", node_name, exc)
 
             # ── supervisor ────────────────────────────────────────────────
             if node_name == "supervisor":
@@ -120,13 +164,12 @@ async def run_langgraph_sse(
 
             # ── chat / synthesize (terminal nodes) ────────────────────────
             elif node_name in ("chat", "synthesize"):
+                local_visualizations = deduplicate_visualizations(local_visualizations)
                 chart_specs = [v for v in local_visualizations if "type" in v]
                 chart_spec = chart_specs[0] if chart_specs else {}
                 diagram_specs = [v for v in local_visualizations if "diagram_type" in v]
 
-                yield format_sse_event(
-                    "final_response",
-                    {
+                final_payload = {
                         "summary": state_update.get("summary", ""),
                         "data_analysis": state_update.get("data_analysis", {}),
                         "response_verification": state_update.get("response_verification", {}),
@@ -134,9 +177,27 @@ async def run_langgraph_sse(
                         "chart_specs": chart_specs,
                         "diagram_spec": diagram_specs,
                         "visualizations": local_visualizations,
-                        "tool_calls": state_update.get("tool_calls", []),
-                    },
-                )
+                        "tool_calls": local_tool_calls,
+                        "task_ledger": state_update.get("task_ledger", latest_task_ledger),
+                        "execution_status": state_update.get("execution_status", "complete"),
+                        "execution_trace": local_trace,
+                        "compiled_request": compiled_request,
+                        "request_id": request_id,
+                    }
+                if request_id:
+                    try:
+                        await save_execution_checkpoint(request_id, {
+                            "status": "complete",
+                            "request_fingerprint": request_hash,
+                            "final_response": final_payload,
+                            "execution_trace": local_trace,
+                        })
+                    except Exception as exc:
+                        logger.warning("Final checkpoint write failed: %s", exc)
+                yield format_sse_event("final_response", final_payload)
 
     logger.info("SSE Stream complete")
-    yield format_sse_event("complete", {"ok": True})
+    complete_payload: dict[str, Any] = {"ok": True}
+    if request_id:
+        complete_payload["request_id"] = request_id
+    yield format_sse_event("complete", complete_payload)

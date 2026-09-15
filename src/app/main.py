@@ -10,7 +10,7 @@ _src_root = str(Path(__file__).resolve().parent.parent)
 if _src_root not in sys.path:
     sys.path.insert(0, _src_root)
 
-from fastapi import FastAPI, Request, HTTPException  # noqa: E402
+from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
@@ -111,8 +111,7 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 # CORS — restrict origins in production via CORS_ORIGINS env var
-import os as _os
-_cors_origins_env = _os.environ.get("CORS_ORIGINS", "")
+_cors_origins_env = os.environ.get("CORS_ORIGINS", "")
 _cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,

@@ -4,13 +4,14 @@ from __future__ import annotations
 from typing import Any
 
 from services.request_requirements import requested_visualizations_from_prompt
+from services.artifact_validation import validate_visualization, visual_for_artifact
 
 
 _CHART_TYPES = {"bar", "line", "pie", "scatter"}
 _DIAGRAM_TYPES = {"er", "process", "decision"}
 
 
-def _requested_artifacts(
+def requested_artifacts(
     plan: dict[str, Any], has_rows: bool, original_prompt: str = "",
 ) -> list[str]:
     intent = plan.get("intent", "query")
@@ -51,7 +52,7 @@ def verify_agent_response(
     visuals = visualizations or []
     calls = tool_calls or []
     analysis = data_analysis or {}
-    requested = _requested_artifacts(supervisor_plan, bool(rows), original_prompt)
+    requested = requested_artifacts(supervisor_plan, bool(rows), original_prompt)
 
     delivered: set[str] = set()
     if sql_query.strip() and not fatal_error:
@@ -67,54 +68,15 @@ def verify_agent_response(
     if analysis and analysis.get("row_count", 0) == len(rows):
         delivered.add("analysis")
 
-    for visual in visuals:
-        chart_type = visual.get("type")
-        if chart_type in _CHART_TYPES and visual.get("data"):
-            delivered.add(f"{chart_type}_chart")
-        diagram_type = visual.get("diagram_type")
-        mermaid = visual.get("mermaid", "")
-        diagram_is_real = (
-            mermaid
-            and "NO_SCHEMA_LOADED" not in mermaid
-            and "NO_DATA" not in mermaid
-            and "NOT_APPLICABLE" not in mermaid
-        )
-        if diagram_type == "er":
-            diagram_is_real = (
-                diagram_is_real
-                and visual.get("generation_basis") == "schema_metadata"
-            )
-        if diagram_type == "process":
-            expected_process_basis = {
-                "state_transitions": "query_state_transitions",
-                "ordered_steps": "query_ordered_steps",
-                "schema_flow": "schema_foreign_keys",
-            }
-            process_mode = visual.get("process_mode")
-            diagram_is_real = (
-                diagram_is_real
-                and process_mode in expected_process_basis
-                and expected_process_basis[process_mode] == visual.get("generation_basis")
-            )
-        if diagram_type == "decision":
-            expected_decision_basis = {
-                "rule_hierarchy": "query_rule_hierarchy",
-                "learned_classification": "query_labeled_outcomes",
-            }
-            decision_mode = visual.get("decision_mode")
-            diagram_is_real = (
-                diagram_is_real
-                and decision_mode in expected_decision_basis
-                and expected_decision_basis[decision_mode] == visual.get("generation_basis")
-            )
-        if diagram_type in _DIAGRAM_TYPES and diagram_is_real:
-            delivered.add({
-                "er": "er_diagram",
-                "process": "process_flow",
-                "decision": "decision_tree",
-            }[diagram_type])
-            if diagram_type == "er":
-                delivered.add("schema_context")
+    for artifact in requested:
+        if artifact in {f"{kind}_chart" for kind in _CHART_TYPES} or artifact in {
+            "er_diagram", "process_flow", "decision_tree",
+        }:
+            validation = validate_visualization(artifact, visual_for_artifact(artifact, visuals))
+            if validation["valid"]:
+                delivered.add(artifact)
+                if artifact == "er_diagram":
+                    delivered.add("schema_context")
 
     missing = [artifact for artifact in requested if artifact not in delivered]
     warnings: list[str] = []
