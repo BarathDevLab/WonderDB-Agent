@@ -111,11 +111,23 @@ ALIASES:
   • Quote aliases containing spaces or reserved words: AS "Order Date".
 
 DECISION-TREE REQUESTS:
-  • When the user explicitly requests a decision tree backed by data, return row-level
-    labeled examples with the requested decision target aliased as outcome plus the
-    meaningful feature columns needed to explain that outcome.
-  • Do not invent decision rules or manufacture an outcome column that is absent from
-    the schema/request. Do not substitute an arbitrary aggregate or median split.
+  • For a predictive/classification tree, return at least four row-level labeled examples.
+    Alias the factual target as outcome and include meaningful feature columns.
+  • A factual outcome may be derived from real columns or join presence, for example
+    CASE WHEN returns.return_id IS NULL THEN 'Not returned' ELSE 'Returned' END AS outcome.
+  • For an outcome-probability tree, return outcome, outcome_count, and
+    outcome_probability (0-1 or 0-100).
+  • For a branching transition tree, return source_state, outcome,
+    transition_count, and transition_probability.
+  • A usable tree needs at least two observed outcomes or two genuine branch values.
+    Never use an ID, masked PII, or a constant string literal as a requested segment/outcome.
+  • If a requested dimension is listed as unavailable in the request contract, use the
+    closest real categorical schema column and alias it source_state. Do not pretend the
+    substitute is the missing dimension.
+  • Never create a synthetic replacement segment/tier with CASE thresholds when the
+    requested conditioning dimension is unavailable.
+  • Do not invent outcomes or rules. Every outcome and probability must be computed
+    from the supplied schema. Do not substitute an arbitrary median split.
 
 CONVERSATIONAL FOLLOW-UPS:
   • The request may contain labeled CONVERSATION CONTEXT and CURRENT USER REQUEST blocks.

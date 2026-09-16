@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import json
 import sys
 from pathlib import Path
 from typing import Any
+from mcp_server.protocol import MCP_SERVER_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +31,12 @@ logger = logging.getLogger(__name__)
 _mcp_session: Any | None = None
 _mcp_exit_stack: Any | None = None
 _mcp_restart_lock = asyncio.Lock()
+_mcp_verified_version: str | None = None
 
 
 async def start_mcp_client() -> None:
     """Spawn the MCP server subprocess and establish a persistent ClientSession."""
-    global _mcp_session, _mcp_exit_stack
+    global _mcp_session, _mcp_exit_stack, _mcp_verified_version
 
     try:
         from contextlib import AsyncExitStack
@@ -59,16 +62,33 @@ async def start_mcp_client() -> None:
             ClientSession(read, write)
         )
         await _mcp_session.initialize()
+        version_result = await _mcp_session.call_tool("get_server_info", arguments={})
+        version_text = version_result.content[0].text if version_result.content else "{}"
+        version_payload = json.loads(version_text)
+        actual_version = version_payload.get("protocol_version")
+        if actual_version != MCP_SERVER_PROTOCOL_VERSION:
+            raise RuntimeError(
+                "MCP server protocol mismatch: "
+                f"expected {MCP_SERVER_PROTOCOL_VERSION}, received {actual_version or 'unknown'}"
+            )
+        _mcp_verified_version = actual_version
         logger.info("MCP client connected to %s", server_script)
 
     except Exception as exc:
         logger.error("MCP client failed to start: %s", exc)
         _mcp_session = None
+        _mcp_verified_version = None
+        if _mcp_exit_stack is not None:
+            try:
+                await _mcp_exit_stack.aclose()
+            except BaseException:
+                pass
+            _mcp_exit_stack = None
 
 
 async def stop_mcp_client() -> None:
     """Shut down the MCP session and terminate the server subprocess."""
-    global _mcp_session, _mcp_exit_stack
+    global _mcp_session, _mcp_exit_stack, _mcp_verified_version
     if _mcp_exit_stack is not None:
         try:
             await _mcp_exit_stack.aclose()
@@ -82,14 +102,15 @@ async def stop_mcp_client() -> None:
         finally:
             _mcp_session = None
             _mcp_exit_stack = None
+            _mcp_verified_version = None
 
 
 async def get_mcp_session() -> Any:
     """Return the active MCP ClientSession. Raises RuntimeError if not started."""
-    if _mcp_session is None:
+    if _mcp_session is None or _mcp_verified_version != MCP_SERVER_PROTOCOL_VERSION:
         raise RuntimeError(
-            "MCP session is not initialized. Ensure start_mcp_client() "
-            "was called during application startup."
+            "MCP session is not initialized or failed its version handshake. "
+            "Restart the application so start_mcp_client() can launch a current subprocess."
         )
     return _mcp_session
 

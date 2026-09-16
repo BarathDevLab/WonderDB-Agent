@@ -8,6 +8,7 @@ import { DiagramViewer } from './components/DiagramViewer';
 import { ToolCallBadge } from './components/ToolCallBadge';
 import { SchemaDrawer } from './components/SchemaDrawer';
 import { ChatInput } from './components/ChatInput';
+import { PromptTemplateCards } from './components/PromptTemplateCards';
 import { CodeBlock } from './components/CodeBlock';
 import { useAgentStream } from './hooks/useAgentStream';
 import ReactMarkdown from 'react-markdown';
@@ -149,22 +150,47 @@ export const App: React.FC = () => {
 
         {/* Central Canvas */}
         <main className="flex-1 overflow-y-auto px-3 sm:px-6 py-6">
-          <div className="mx-auto max-w-3xl space-y-5">
+          <div className={`mx-auto space-y-5 ${messages.length === 0 && !currentMessage ? 'max-w-4xl' : 'max-w-3xl'}`}>
             {/* Welcome Screen when Session is Empty */}
             {messages.length === 0 && !currentMessage && (
-              <div className="flex flex-col items-center justify-center min-h-[60vh] w-full max-w-3xl mx-auto animate-fadeIn">
-                <div className="flex items-center gap-3 mb-8">
-                  <img src="/logo.png" alt="WonderDB Logo" className="h-10 w-10 object-contain" />
+              <div className="flex flex-col items-center justify-center min-h-[70vh] w-full mx-auto py-4 animate-fadeIn">
+                <div className="flex items-center gap-3 mb-2">
+                  <img src="/logo.png" alt="WonderDB Logo" className="h-11 w-11 object-contain" />
                   <h1 className="text-4xl font-serif text-zinc-100 tracking-tight">
                     WonderDB Agent
                   </h1>
                 </div>
-                <ChatInput 
-                  onSend={(prompt) => sendPrompt(prompt, selectedTenant)} 
-                  onCancel={cancelStream}
-                  isStreaming={isStreaming} 
-                  className="bg-transparent"
-                />
+                <p className="text-sm text-zinc-400 text-center max-w-lg mb-6 leading-relaxed">
+                  Query PostgreSQL in natural language, generate real-time Chart.js visuals, render Mermaid diagrams, and explore schema intelligence.
+                </p>
+
+                <div className="w-full max-w-2xl mb-6">
+                  <ChatInput 
+                    onSend={(prompt) => sendPrompt(prompt, selectedTenant)} 
+                    onCancel={cancelStream}
+                    isStreaming={isStreaming} 
+                    className="bg-transparent px-0"
+                  />
+                </div>
+
+                {/* Schema-grounded Prompt Template Cards */}
+                <div className="w-full">
+                  <div className="flex items-center justify-between px-1 mb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+                      <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                        Schema Prompt Templates
+                      </h2>
+                    </div>
+                    <span className="text-[11px] text-zinc-500">
+                      Click any card to run query
+                    </span>
+                  </div>
+                  <PromptTemplateCards
+                    onSelectPrompt={(prompt) => sendPrompt(prompt, selectedTenant)}
+                    disabled={isStreaming}
+                  />
+                </div>
               </div>
             )}
 

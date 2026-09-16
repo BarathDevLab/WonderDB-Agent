@@ -90,6 +90,7 @@ async def test_mcp_call_restarts_dead_transport_once(monkeypatch) -> None:
     dead = DeadSession()
     live = LiveSession()
     mcp_client._mcp_session = dead
+    mcp_client._mcp_verified_version = mcp_client.MCP_SERVER_PROTOCOL_VERSION
     lifecycle = []
 
     async def fake_stop():
@@ -98,6 +99,7 @@ async def test_mcp_call_restarts_dead_transport_once(monkeypatch) -> None:
     async def fake_start():
         lifecycle.append("start")
         mcp_client._mcp_session = live
+        mcp_client._mcp_verified_version = mcp_client.MCP_SERVER_PROTOCOL_VERSION
 
     monkeypatch.setattr(mcp_client, "stop_mcp_client", fake_stop)
     monkeypatch.setattr(mcp_client, "start_mcp_client", fake_start)
@@ -106,4 +108,4 @@ async def test_mcp_call_restarts_dead_transport_once(monkeypatch) -> None:
     assert result == {"tool": "get_schema", "arguments": {}}
     assert lifecycle == ["stop", "start"]
     mcp_client._mcp_session = None
-
+    mcp_client._mcp_verified_version = None

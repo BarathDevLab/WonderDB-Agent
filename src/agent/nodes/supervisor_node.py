@@ -450,7 +450,7 @@ async def supervisor_node(state: GlobalState) -> GlobalState:
         plan["visualizations"] = []
         plan["needs_explanation"] = True
 
-    compiled_request = compile_request(prompt, conversation_context, plan)
+    compiled_request = compile_request(prompt, conversation_context, plan, retrieved_schemas)
     planning_error = ""
     if compiled_request["operation"] == "rejected_write":
         plan = {"intent": "error", "visualizations": [], "needs_explanation": False}

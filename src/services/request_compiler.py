@@ -22,6 +22,7 @@ def compile_request(
     prompt: str,
     conversation_context: dict[str, Any] | None,
     plan: dict[str, Any],
+    schemas: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Create deterministic IR that constrains a weaker planning/SQL model."""
     context = conversation_context or {}
@@ -39,6 +40,14 @@ def compile_request(
         r"\b(?:by|per|for each|grouped by)\s+([a-z][a-z0-9_]*)\b",
         lowered,
     )
+    based_on = re.search(
+        r"\bbased on\s+([a-z][a-z0-9_]*(?:\s+[a-z][a-z0-9_]*)?)(?=\s*(?:[.,;]|$))",
+        lowered,
+    )
+    if based_on:
+        dimension = "_".join(based_on.group(1).split())
+        if dimension not in dimensions:
+            dimensions.append(dimension)
     if grain and grain not in dimensions:
         dimensions.append(grain)
 
@@ -56,6 +65,26 @@ def compile_request(
     ):
         operation = "rejected_write"
 
+    decision_mode = None
+    if "decision_tree" in artifacts:
+        if re.search(r"\b(?:probability|probabilities|likelihood|path|paths|transition)\b", lowered):
+            decision_mode = "probability_paths"
+        elif re.search(r"\b(?:rule|rules|policy|policies|condition|conditions)\b", lowered):
+            decision_mode = "rule_hierarchy"
+        else:
+            decision_mode = "classification"
+
+    schema_columns = {
+        str(column.get("name", "")).lower()
+        for table in schemas or []
+        for column in table.get("columns", [])
+        if column.get("name")
+    }
+    unavailable_dimensions = [
+        dimension for dimension in dimensions
+        if schema_columns and dimension.lower() not in schema_columns
+    ]
+
     return {
         "version": "1.0",
         "original_question": prompt,
@@ -64,10 +93,12 @@ def compile_request(
         "operation": operation,
         "measures": measures,
         "dimensions": dimensions,
+        "unavailable_dimensions": unavailable_dimensions,
         "filters": filters,
         "time_grain": grain,
         "row_limit": int(limit_match.group(1)) if limit_match else None,
         "requested_artifacts": artifacts,
+        "decision_tree_mode": decision_mode,
         "needs_explanation": bool(plan.get("needs_explanation")),
         "is_followup": bool(context.get("is_followup")),
         "followup_kind": context.get("followup_kind", "none"),

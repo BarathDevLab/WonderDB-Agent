@@ -149,3 +149,27 @@ def test_verifier_rejects_fabricated_or_unclassified_decision_tree() -> None:
 
     assert invalid["missing_artifacts"] == ["decision_tree"]
     assert valid["verified"] is True
+
+
+def test_verifier_accepts_grounded_probability_decision_tree() -> None:
+    result = verify_agent_response(
+        supervisor_plan={
+            "intent": "query",
+            "visualizations": ["decision_tree"],
+            "needs_explanation": False,
+        },
+        sql_query="SELECT status AS outcome, COUNT(*) AS outcome_count FROM shipments GROUP BY status",
+        raw_data=[
+            {"outcome": "Delivered", "outcome_count": 18},
+            {"outcome": "Processing", "outcome_count": 2},
+        ],
+        visualizations=[{
+            "diagram_type": "decision",
+            "decision_mode": "probability_outcomes",
+            "generation_basis": "query_outcome_distribution",
+            "mermaid": "flowchart TD\n  ROOT -->|90%| DELIVERED",
+        }],
+        data_analysis={"row_count": 2, "data_quality": {}},
+    )
+
+    assert result["verified"] is True

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowUp, Square, HelpCircle, Mic, MicOff } from 'lucide-react';
+import { ArrowUp, Square, HelpCircle, Mic, MicOff, Sparkles } from 'lucide-react';
+import { SCHEMA_PROMPT_TEMPLATES } from './PromptTemplateCards';
 
 interface ChatInputProps {
   onSend: (prompt: string) => void;
@@ -7,13 +8,6 @@ interface ChatInputProps {
   isStreaming: boolean;
   className?: string;
 }
-
-export const PROMPT_SUGGESTIONS = [
-  { label: 'Monthly Revenue', prompt: 'Show me total revenue and monthly sales performance' },
-  { label: 'Top Customers', prompt: 'Who are our top customers by total spent and what is their contact info?' },
-  { label: 'Product Catalog', prompt: 'List available products and their pricing categories' },
-  { label: 'Order Statuses', prompt: 'Calculate total order count grouped by order status' },
-];
 
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
@@ -23,6 +17,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 }) => {
   const [prompt, setPrompt] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [showQuickTemplates, setShowQuickTemplates] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
 
@@ -104,7 +99,29 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   return (
     <div className={`sticky bottom-0 z-20 w-full bg-[#131314] pt-2 pb-6 px-3 sm:px-6 ${className}`}>
-      <div className="mx-auto max-w-3xl space-y-3">
+      <div className="mx-auto max-w-3xl space-y-2">
+        {/* Quick Schema Templates Drawer/Row */}
+        {showQuickTemplates && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-none animate-fadeIn">
+            {SCHEMA_PROMPT_TEMPLATES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setPrompt(t.prompt);
+                  textareaRef.current?.focus();
+                  setShowQuickTemplates(false);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] bg-[#1e1f20] hover:bg-[#2a2c30] text-zinc-300 hover:text-white border border-zinc-800 transition-colors shrink-0 shadow-sm"
+              >
+                <Sparkles className="h-3 w-3 text-emerald-400" />
+                <span className="font-medium">{t.title}</span>
+                <span className="text-[9.5px] text-zinc-500 font-mono">[{t.outputType}]</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Input Box */}
         <form onSubmit={handleSubmit} className="relative">
           <div className="relative flex items-center rounded-full bg-[#1e1f20] px-3 py-1.5 focus-within:ring-1 focus-within:ring-zinc-600 transition-all">
@@ -122,6 +139,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
             {/* Right Actions */}
             <div className="flex items-center gap-1 shrink-0 px-1">
+              {/* Quick Templates Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowQuickTemplates((prev) => !prev)}
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                  showQuickTemplates
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+                }`}
+                title="Toggle schema prompt templates"
+              >
+                <Sparkles className="h-4 w-4" />
+              </button>
+
               <button
                 type="button"
                 onClick={toggleListening}

@@ -95,6 +95,21 @@ def test_subjectless_chart_request_uses_previous_query_context() -> None:
     assert "Show orders by status" in context["resolved_prompt"]
 
 
+def test_subjectless_decision_tree_request_uses_previous_query_context() -> None:
+    context = build_conversation_context(
+        [_summary(
+            "Show outcomes by membership tier",
+            "SELECT membership_tier, outcome, COUNT(*) FROM orders GROUP BY 1, 2",
+            "VIP customers favor laptops.",
+        )],
+        "Generate a decision tree",
+    )
+
+    assert context["is_followup"] is True
+    assert context["followup_kind"] == "data"
+    assert "Show outcomes by membership tier" in context["resolved_prompt"]
+
+
 def test_implicit_elliptical_question_uses_previous_result() -> None:
     context = build_conversation_context(
         [_summary("Compare quarterly product growth", "SELECT product, growth FROM sales", "A led growth.")],

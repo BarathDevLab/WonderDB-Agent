@@ -1,7 +1,8 @@
 """
 MCP Server — AI Database Agent Tools
 =====================================
-Exposes 7 tools via FastMCP (stdio transport):
+Exposes 8 tools via FastMCP (stdio transport):
+  0. get_server_info  â€” protocol/version handshake for subprocess freshness
   1. get_schema       — fetch raw DB schema from information_schema
   2. execute_query    — validate + execute SQL with RLS, cost gate, PII redact
   3. generate_chart   — build Chart.js spec (bar/line/pie/scatter)
@@ -44,6 +45,17 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("AIDatabaseAgent")
+
+
+@mcp.tool()
+def get_server_info() -> str:
+    """Return the MCP protocol version used to reject stale subprocesses."""
+    from mcp_server.protocol import MCP_SERVER_PROTOCOL_VERSION
+
+    return json.dumps({
+        "name": "AIDatabaseAgent",
+        "protocol_version": MCP_SERVER_PROTOCOL_VERSION,
+    })
 
 # ---------------------------------------------------------------------------
 # In-memory schema catalog (populated by get_schema at startup)
@@ -541,11 +553,15 @@ def generate_flowchart(
     elif diagram_type == "decision":
         decision_mode = _detect_decision_mode(raw_data)
         mermaid = _build_decision_tree(raw_data, title, decision_mode)
-        if decision_mode == "learned_classification":
+        if decision_mode in {"learned_classification", "probability_outcomes"}:
             decision_target = _classification_target(raw_data)
+        elif decision_mode == "probability_transitions":
+            decision_target = _find_key(_decision_keys(raw_data), _TO_STATE_ALIASES) or _classification_target(raw_data)
         generation_basis = {
             "rule_hierarchy": "query_rule_hierarchy",
             "learned_classification": "query_labeled_outcomes",
+            "probability_outcomes": "query_outcome_distribution",
+            "probability_transitions": "query_transition_probabilities",
         }.get(decision_mode, "none")
     else:
         diagram_type = "process"
@@ -819,6 +835,25 @@ _DECISION_NODE_ID_ALIASES = {"node_id", "decision_node_id", "rule_id"}
 _DECISION_PARENT_ID_ALIASES = {"parent_id", "parent_node_id", "parent_rule_id"}
 _DECISION_LABEL_ALIASES = {"node_label", "question", "condition", "rule", "outcome"}
 _DECISION_BRANCH_ALIASES = {"branch", "branch_label", "edge_label", "answer"}
+_DECISION_COUNT_ALIASES = {
+    "count", "total", "frequency", "outcome_count", "transition_count", "sample_count",
+}
+_DECISION_PROBABILITY_ALIASES = {
+    "probability", "percentage", "percent", "pct", "share", "likelihood",
+    "outcome_probability", "transition_probability",
+}
+
+
+def _decision_metric_key(
+    keys: list[str], aliases: set[str], suffixes: tuple[str, ...],
+) -> str | None:
+    exact = _find_key(keys, aliases)
+    if exact:
+        return exact
+    return next(
+        (key for key in keys if key.lower().strip().endswith(suffixes)),
+        None,
+    )
 
 
 def _decision_keys(raw_data: list[dict[str, Any]]) -> list[str]:
@@ -828,7 +863,11 @@ def _decision_keys(raw_data: list[dict[str, Any]]) -> list[str]:
 def _classification_target(raw_data: list[dict[str, Any]]) -> str | None:
     keys = _decision_keys(raw_data)
     for key in keys:
-        if key.lower().strip() not in _DECISION_TARGET_ALIASES:
+        normalized = key.lower().strip()
+        if (
+            normalized not in _DECISION_TARGET_ALIASES
+            and not normalized.endswith(("_outcome", "_status", "_result", "_decision", "_label", "_class"))
+        ):
             continue
         values = {str(row[key]) for row in raw_data if row.get(key) is not None}
         if 2 <= len(values) <= 12:
@@ -849,15 +888,30 @@ def _detect_decision_mode(raw_data: list[dict[str, Any]]) -> str:
     if has_hierarchy:
         return "rule_hierarchy"
     target_key = _classification_target(raw_data)
-    labeled_rows = [row for row in raw_data if target_key and row.get(target_key) is not None]
-    if not target_key or len(labeled_rows) < 4:
-        return "not_applicable"
-    features = _classification_feature_keys(labeled_rows, target_key)
-    return (
-        "learned_classification"
-        if _best_classification_split(labeled_rows, target_key, features)
-        else "not_applicable"
+    count_key = _decision_metric_key(keys, _DECISION_COUNT_ALIASES, ("_count", "_total"))
+    probability_key = _decision_metric_key(
+        keys, _DECISION_PROBABILITY_ALIASES, ("_probability", "_percentage", "_percent", "_pct", "_share"),
     )
+    from_key = _find_key(keys, _FROM_STATE_ALIASES)
+    to_key = _find_key(keys, _TO_STATE_ALIASES) or (target_key if from_key else None)
+    if from_key and to_key and (count_key or probability_key):
+        transitions = {
+            (str(row.get(from_key)), str(row.get(to_key)))
+            for row in raw_data
+            if row.get(from_key) is not None and row.get(to_key) is not None
+        }
+        if transitions:
+            return "probability_transitions"
+    if target_key and (count_key or probability_key):
+        outcomes = {str(row.get(target_key)) for row in raw_data if row.get(target_key) is not None}
+        if len(outcomes) >= 2:
+            return "probability_outcomes"
+    labeled_rows = [row for row in raw_data if target_key and row.get(target_key) is not None]
+    if target_key and len(labeled_rows) >= 4:
+        features = _classification_feature_keys(labeled_rows, target_key)
+        if _best_classification_split(labeled_rows, target_key, features):
+            return "learned_classification"
+    return "not_applicable"
 
 
 def _gini(rows: list[dict[str, Any]], target_key: str) -> float:
@@ -1023,6 +1077,159 @@ def _build_classification_tree(raw_data: list[dict[str, Any]], target_key: str) 
     return "\n".join(lines)
 
 
+def _decision_edge_label(
+    probability: float | None,
+    count: float | None,
+    denominator: float,
+) -> str:
+    if probability is None and count is not None and denominator > 0:
+        probability = count / denominator * 100
+    elif probability is not None and 0 <= probability <= 1:
+        probability *= 100
+    parts: list[str] = []
+    if probability is not None and math.isfinite(probability):
+        parts.append(f"{probability:.1f}%")
+    if count is not None and math.isfinite(count):
+        display_count = int(count) if count.is_integer() else round(count, 2)
+        parts.append(f"n={display_count}")
+    return " · ".join(parts) or "Observed"
+
+
+def _build_probability_outcomes(raw_data: list[dict[str, Any]]) -> str:
+    keys = _decision_keys(raw_data)
+    target_key = _classification_target(raw_data)
+    count_key = _decision_metric_key(keys, _DECISION_COUNT_ALIASES, ("_count", "_total"))
+    probability_key = _decision_metric_key(
+        keys, _DECISION_PROBABILITY_ALIASES, ("_probability", "_percentage", "_percent", "_pct", "_share"),
+    )
+    assert target_key and (count_key or probability_key)
+
+    excluded = {target_key, count_key, probability_key}
+    group_key = next((
+        key for key in keys
+        if key not in excluded
+        and not key.lower().endswith("_id")
+        and key.lower() not in {"id", "date", "month", "year", "timestamp"}
+        and 2 <= len({str(row[key]) for row in raw_data if row.get(key) is not None}) <= 12
+        and any(not isinstance(row.get(key), (int, float)) for row in raw_data if row.get(key) is not None)
+    ), None)
+
+    grouped: dict[str, dict[str, dict[str, float | None]]] = {}
+    for row in raw_data:
+        if row.get(target_key) is None:
+            continue
+        group = _mermaid_label(row.get(group_key), 38) if group_key and row.get(group_key) is not None else "All records"
+        outcome = _mermaid_label(row[target_key], 46)
+        bucket = grouped.setdefault(group, {}).setdefault(outcome, {
+            "count": 0.0 if count_key else None,
+            "probability": 0.0 if probability_key else None,
+        })
+        if count_key:
+            value = _numeric_value(row.get(count_key))
+            if value is not None:
+                bucket["count"] = float(bucket["count"] or 0) + max(0.0, value)
+        if probability_key:
+            value = _numeric_value(row.get(probability_key))
+            if value is not None:
+                bucket["probability"] = float(bucket["probability"] or 0) + max(0.0, value)
+
+    root_label = _mermaid_label(
+        group_key.replace("_", " ").title() if group_key else target_key.replace("_", " ").title(),
+        36,
+    )
+    lines = [
+        "flowchart TD",
+        f'  ROOT{{"{root_label}?"}}',
+        "  classDef outcome fill:#064e3b,stroke:#10b981,color:#f4f4f5",
+        "  classDef decision fill:#3b0764,stroke:#a855f7,color:#f4f4f5",
+    ]
+    leaf_ids: list[str] = []
+    decision_ids = ["ROOT"]
+    leaf_index = 0
+    for group_index, (group, outcomes) in enumerate(grouped.items()):
+        denominator = sum(float(item["count"] or 0) for item in outcomes.values())
+        parent_id = "ROOT"
+        if group_key:
+            parent_id = f"G{group_index}"
+            decision_ids.append(parent_id)
+            lines.append(f'  {parent_id}{{"Observed {target_key.replace("_", " ").title()}?"}}')
+            lines.append(f"  ROOT -->|{group}| {parent_id}")
+        for outcome, metrics in outcomes.items():
+            node_id = f"D{leaf_index}"
+            leaf_index += 1
+            leaf_ids.append(node_id)
+            lines.append(f'  {node_id}(["{outcome}"])')
+            edge_label = _decision_edge_label(
+                metrics["probability"], metrics["count"], denominator,
+            )
+            lines.append(f"  {parent_id} -->|{edge_label}| {node_id}")
+    lines.append(f"  class {','.join(decision_ids)} decision")
+    if leaf_ids:
+        lines.append(f"  class {','.join(leaf_ids)} outcome")
+    return "\n".join(lines)
+
+
+def _build_probability_transitions(raw_data: list[dict[str, Any]]) -> str:
+    keys = _decision_keys(raw_data)
+    from_key = _find_key(keys, _FROM_STATE_ALIASES)
+    to_key = _find_key(keys, _TO_STATE_ALIASES) or _classification_target(raw_data)
+    count_key = _decision_metric_key(keys, _DECISION_COUNT_ALIASES, ("_count", "_total"))
+    probability_key = _decision_metric_key(
+        keys, _DECISION_PROBABILITY_ALIASES, ("_probability", "_percentage", "_percent", "_pct", "_share"),
+    )
+    assert from_key and to_key and (count_key or probability_key)
+
+    transitions: dict[tuple[str, str], dict[str, float | None]] = {}
+    for row in raw_data:
+        if row.get(from_key) is None or row.get(to_key) is None:
+            continue
+        edge = (_mermaid_label(row[from_key], 42), _mermaid_label(row[to_key], 42))
+        bucket = transitions.setdefault(edge, {
+            "count": 0.0 if count_key else None,
+            "probability": 0.0 if probability_key else None,
+        })
+        if count_key:
+            value = _numeric_value(row.get(count_key))
+            if value is not None:
+                bucket["count"] = float(bucket["count"] or 0) + max(0.0, value)
+        if probability_key:
+            value = _numeric_value(row.get(probability_key))
+            if value is not None:
+                bucket["probability"] = float(bucket["probability"] or 0) + max(0.0, value)
+
+    sources = {source for source, _ in transitions}
+    labels = list(dict.fromkeys(label for edge in transitions for label in edge))
+    node_ids = {label: f"D{index}" for index, label in enumerate(labels)}
+    lines = [
+        "flowchart TD",
+        "  classDef outcome fill:#064e3b,stroke:#10b981,color:#f4f4f5",
+        "  classDef decision fill:#3b0764,stroke:#a855f7,color:#f4f4f5",
+    ]
+    for label in labels:
+        node_id = node_ids[label]
+        lines.append(
+            f'  {node_id}{{"{label}?"}}'
+            if label in sources else f'  {node_id}(["{label}"])'
+        )
+    for (source, target), metrics in transitions.items():
+        denominator = sum(
+            float(item["count"] or 0)
+            for (candidate_source, _), item in transitions.items()
+            if candidate_source == source
+        )
+        edge_label = _decision_edge_label(
+            metrics["probability"], metrics["count"], denominator,
+        )
+        lines.append(f"  {node_ids[source]} -->|{edge_label}| {node_ids[target]}")
+    decision_ids = [node_ids[label] for label in labels if label in sources]
+    outcome_ids = [node_ids[label] for label in labels if label not in sources]
+    if decision_ids:
+        lines.append(f"  class {','.join(decision_ids)} decision")
+    if outcome_ids:
+        lines.append(f"  class {','.join(outcome_ids)} outcome")
+    return "\n".join(lines)
+
+
 def _build_decision_tree(
     raw_data: list[dict[str, Any]], title: str = "", mode: str | None = None,
 ) -> str:
@@ -1034,6 +1241,10 @@ def _build_decision_tree(
         target_key = _classification_target(raw_data)
         assert target_key
         return _build_classification_tree(raw_data, target_key)
+    if mode == "probability_outcomes":
+        return _build_probability_outcomes(raw_data)
+    if mode == "probability_transitions":
+        return _build_probability_transitions(raw_data)
     reason = _mermaid_label(title or "Decision tree requires rules or labeled outcomes", 72)
     return f'flowchart TD\n  NOT_APPLICABLE["Cannot build a grounded decision tree: {reason}"]'
 

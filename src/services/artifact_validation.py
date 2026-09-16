@@ -12,6 +12,8 @@ _PROCESS_BASES = {
 _DECISION_BASES = {
     "rule_hierarchy": "query_rule_hierarchy",
     "learned_classification": "query_labeled_outcomes",
+    "probability_outcomes": "query_outcome_distribution",
+    "probability_transitions": "query_transition_probabilities",
 }
 
 

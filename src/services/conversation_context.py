@@ -13,7 +13,8 @@ _REFERENCE_PATTERNS = (
     r"^(?:what|how)\s+about\b",
     r"^(?:for|during)\s+(?:last|this|previous|next)\b",
     r"^(?:only|exclude|include|filter)\b",
-    r"^(?:show|make|render|visualize)\s+(?:a|an|the)\s+(?:bar|line|pie|scatter)\b",
+    r"^(?:show|make|render|visualize|generate|create|draw)\s+(?:a|an|the)\s+"
+    r"(?:bar|line|pie|scatter|decision\s+tree|er\s+diagram|process\s+flow)\b",
     r"^(?:which (?:one|ones|had|has|was|were)|who (?:was|were)|why (?:did|was|were)|where (?:did|was|were)|when (?:did|was|were))\b",
     r"\b(?:the|that)\s+(?:increase|decrease|spike|drop|trend|result|number|total|value|chart)\b",
     r"\b(?:summari[sz]e|summary|recap|key takeaways?|main findings?|everything so far|conversation so far)\b",

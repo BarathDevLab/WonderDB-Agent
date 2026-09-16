@@ -122,6 +122,7 @@ def _build_explain_prompt(
     raw_results: list[dict[str, Any]],
     retrieved_schemas: list[dict[str, Any]],
     data_analysis: dict[str, Any] | None = None,
+    compiled_request: dict[str, Any] | None = None,
 ) -> str:
     """Build a rich, context-aware prompt for the explain_data MCP tool."""
     _DIAGRAM_LABELS = {
@@ -158,10 +159,14 @@ Relevant tables involved: {schema_context}
 **Verified Deterministic Analysis:**
 {json.dumps(data_analysis, default=str) if data_analysis else "No computed analysis available."}
 
+**Request Contract / Schema Limitations:**
+{json.dumps(compiled_request or {}, default=str)}
+
 **Strict Output Rules:**
 1. You MUST format your response exactly using the Markdown template below. Do not deviate from this structure.
 2. Treat the verified deterministic analysis as the source of truth for all calculations. Do not invent or recalculate metrics.
 3. DO NOT explain the database schema or ER diagrams unless the user explicitly asked how the database works. Focus strictly on the data and business insights.
+4. If `unavailable_dimensions` is non-empty, explicitly say that those dimensions do not exist. Never describe a substitute as if it were the unavailable field.
 
 **Mandatory Markdown Template to use for your response:**
 ### **Executive Performance Summary**
@@ -352,6 +357,7 @@ async def synthesize_node(state: GlobalState) -> GlobalState:
                     raw_results=raw_results,
                     retrieved_schemas=retrieved_schemas,
                     data_analysis=data_analysis,
+                    compiled_request=state.get("compiled_request", {}),
                 )
                 payload = await _call_tool(session, "explain_data", {
                     "prompt": rich_prompt,

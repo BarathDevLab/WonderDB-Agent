@@ -180,3 +180,58 @@ def test_decision_tool_returns_mode_and_prediction_target() -> None:
     assert result["decision_mode"] == "learned_classification"
     assert result["decision_target"] == "outcome"
     assert result["process_mode"] is None
+
+
+def test_aggregated_outcomes_build_probability_decision_tree() -> None:
+    rows = [
+        {"status": "Delivered", "status_count": 18},
+        {"status": "Processing", "status_count": 2},
+    ]
+
+    assert _detect_decision_mode(rows) == "probability_outcomes"
+    result = json.loads(generate_flowchart("decision", raw_data=rows))
+
+    assert result["decision_mode"] == "probability_outcomes"
+    assert result["generation_basis"] == "query_outcome_distribution"
+    assert result["decision_target"] == "status"
+    assert "Delivered" in result["mermaid"]
+    assert "90.0% · n=18" in result["mermaid"]
+    assert "Processing" in result["mermaid"]
+    assert "10.0% · n=2" in result["mermaid"]
+    assert "NOT_APPLICABLE" not in result["mermaid"]
+
+
+def test_transition_probabilities_build_branching_decision_tree() -> None:
+    rows = [
+        {"source_state": "Order placed", "outcome": "Delivered", "transition_count": 8},
+        {"source_state": "Order placed", "outcome": "Cancelled", "transition_count": 2},
+    ]
+
+    assert _detect_decision_mode(rows) == "probability_transitions"
+    result = json.loads(generate_flowchart("decision", raw_data=rows))
+
+    assert result["decision_mode"] == "probability_transitions"
+    assert result["generation_basis"] == "query_transition_probabilities"
+    assert result["decision_target"] == "outcome"
+    assert 'D0{"Order placed?"}' in result["mermaid"]
+    assert "80.0% · n=8" in result["mermaid"]
+    assert "20.0% · n=2" in result["mermaid"]
+
+
+def test_segmented_outcomes_branch_by_conditioning_dimension() -> None:
+    rows = [
+        {"membership_tier": "VIP", "purchase_outcome": "Laptop", "outcome_count": 8},
+        {"membership_tier": "VIP", "purchase_outcome": "Accessories", "outcome_count": 2},
+        {"membership_tier": "Standard", "purchase_outcome": "Laptop", "outcome_count": 3},
+        {"membership_tier": "Standard", "purchase_outcome": "Accessories", "outcome_count": 7},
+    ]
+
+    result = json.loads(generate_flowchart("decision", raw_data=rows))
+
+    assert result["decision_mode"] == "probability_outcomes"
+    assert result["decision_target"] == "purchase_outcome"
+    assert 'ROOT{"Membership Tier?"}' in result["mermaid"]
+    assert "ROOT -->|VIP| G0" in result["mermaid"]
+    assert "ROOT -->|Standard| G1" in result["mermaid"]
+    assert "80.0% · n=8" in result["mermaid"]
+    assert "70.0% · n=7" in result["mermaid"]

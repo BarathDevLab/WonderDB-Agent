@@ -32,7 +32,7 @@ _MAX_SCAN_ENTRIES = 500
 # Cached payloads include rendered artifact specs. Bump this value whenever
 # chart/diagram semantics change so an old visualization cannot bypass the new
 # generator and verifier after deployment.
-_CACHE_SCHEMA_VERSION = "2026-09-diagrams-v3"
+_CACHE_SCHEMA_VERSION = "2026-09-diagrams-v5"
 
 _shared_httpx: httpx.AsyncClient | None = None
 _shared_httpx_loop: Any = None
